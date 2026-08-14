@@ -22,7 +22,10 @@ primary_region = 'sin'
   [[http_service.checks]]
     interval = '30s'
     timeout = '5s'
-    grace_period = '20s'
+    # Generous: `npm run` -> workspace -> tsx must transpile before the listener
+    # binds (~12s observed). A shorter grace makes every deploy log a spurious
+    # "app is not responding" error before the first successful probe.
+    grace_period = '45s'
     method = 'GET'
     path = '/health'
 
