@@ -1,0 +1,17 @@
+{
+  "name": "@openclaw-ton-agent/executor",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "test": "tsx --test src/*.test.ts",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@openclaw-ton-agent/risk-gates": "*",
+    "@openclaw-ton-agent/shared": "*",
+    "dotenv": "^16.4.5"
+  }
+}

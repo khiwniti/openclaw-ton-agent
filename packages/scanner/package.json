@@ -1,0 +1,17 @@
+{
+  "name": "@openclaw-ton-agent/scanner",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "tsx --test src/*.test.ts"
+  },
+  "dependencies": {
+    "@openclaw-ton-agent/shared": "*",
+    "dotenv": "^16.4.5"
+  }
+}

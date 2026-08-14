@@ -1,0 +1,127 @@
+{
+  // openclaw-ton-agent — OpenClaw Gateway configuration (JSON5).
+  // Five isolated trading personas; agent-to-agent messaging carries signals
+  // from the read-only scanner to the gated executor. The executor is the ONLY
+  // agent with write/exec capability, and it still requires confirm + gates.
+
+  agents: {
+    defaults: {
+      // Shared baseline skills every persona can load.
+      skills: [
+        "ton-signal-ingest",
+        "ton-risk-gates",
+        "ton-tpsl-manager",
+        "ton-exit-modes",
+        "ton-execute",
+        "ton-reporting",
+      ],
+      model: "anthropic/claude-sonnet-4-6",
+    },
+    entries: {
+      // L1 ingestion + scanner health. Read-only by construction.
+      "scanner-ops": {
+        name: "Scanner Ops",
+        workspace: "./workspace/scanner-ops",
+        agentDir: "~/.openclaw/agents/scanner-ops/agent",
+        skills: ["ton-signal-ingest", "ton-audit"],
+        tools: {
+          deny: ["write", "edit", "apply_patch", "exec", "browser", "cron", "sessions_spawn"],
+        },
+      },
+      // L2 market intelligence: regime, sentiment, whales.
+      // sperax:* skills are installed from https://github.com/Sperax/sperax-skills (ClawHub).
+      "market-intel": {
+        name: "Market Intel",
+        workspace: "./workspace/market-intel",
+        agentDir: "~/.openclaw/agents/market-intel/agent",
+        skills: ["sperax:crypto-market-sentiment", "sperax:whale-watching-guide", "sperax:crypto-price-data-guide"],
+        tools: {
+          deny: ["write", "edit", "apply_patch", "exec", "browser", "cron"],
+        },
+      },
+      // L3 decision & risk. Proposes verdicts; deterministic gates dispose.
+      "risk-analyst": {
+        name: "Risk Analyst",
+        workspace: "./workspace/risk-analyst",
+        agentDir: "~/.openclaw/agents/risk-analyst/agent",
+        skills: ["ton-risk-gates", "sperax:defi-risk-assessment", "sperax:crypto-portfolio-management"],
+        tools: {
+          deny: ["write", "edit", "apply_patch", "exec", "browser", "cron"],
+        },
+      },
+      // L4 custody & execution. ONLY persona with exec/write tools.
+      executor: {
+        name: "Executor",
+        workspace: "./workspace/executor",
+        agentDir: "~/.openclaw/agents/executor/agent",
+        skills: ["ton-execute", "ton-settlement"],
+        tools: {
+          allow: ["read", "write", "edit", "apply_patch", "exec", "browser", "cron", "sessions_spawn"],
+          deny: [],
+        },
+      },
+      // L6 operator surface: Telegram/Dashboard, manual override.
+      "trader-ui": {
+        name: "Trader UI",
+        workspace: "./workspace/trader-ui",
+        agentDir: "~/.openclaw/agents/trader-ui/agent",
+        skills: ["ton-reporting", "manual-override"],
+        tools: {
+          allow: ["read", "exec", "browser"],
+          deny: ["write", "edit", "apply_patch"],
+        },
+      },
+    },
+  },
+
+  // Signals flow scanner-ops → market-intel → risk-analyst → executor.
+  // Agent-to-agent messaging must be explicitly enabled + allowlisted.
+  tools: {
+    agentToAgent: {
+      enabled: true,
+      allow: ["scanner-ops", "market-intel", "risk-analyst", "executor", "trader-ui"],
+    },
+  },
+
+  // Channel routing: Telegram DM → trader-ui, alerts group → market-intel.
+  channels: {
+    telegram: {
+      accounts: {
+        default: {
+          botToken: "TELEGRAM_BOT_TOKEN",
+          dmPolicy: "pairing",
+        },
+        alerts: {
+          botToken: "TELEGRAM_ALERTS_BOT_TOKEN",
+          dmPolicy: "allowlist",
+          allowFrom: [],
+        },
+      },
+    },
+  },
+
+  bindings: [
+    { agentId: "trader-ui", match: { channel: "telegram", accountId: "default" } },
+    { agentId: "market-intel", match: { channel: "telegram", accountId: "alerts" } },
+  ],
+
+  // Plugin/MCP servers registered as OpenClaw extensions.
+  plugins: {
+    entries: {
+      // Official TON Blockchain MCP (agentic wallets + swaps via Omniston).
+      ton: {
+        enabled: true,
+        source: "clawhub:ton-mcp",
+        config: {},
+      },
+      // Official TON Documentation MCP (hosted).
+      "ton-docs": {
+        enabled: true,
+        config: { url: "https://docs.ton.org/mcp" },
+      },
+      // On-chain analytics for whale/smart-money intel.
+      dune: { enabled: true, config: {} },
+      sim: { enabled: true, config: {} },
+    },
+  },
+}

@@ -1,0 +1,411 @@
+{
+  "api_key": "",
+  "model": "openai/gpt-oss-120b",
+  "max_tokens": 16384,
+  "base_url": "https://integrate.api.nvidia.com/v1",
+  "timeout": 30.0,
+  "context_window_tokens": null,
+  "auto_compact_threshold_tokens": null,
+  "api_format": "openai",
+  "provider": "nvidia",
+  "active_profile": "nvidia",
+  "profiles": {
+    "claude-api": {
+      "label": "Anthropic-Compatible API",
+      "provider": "anthropic",
+      "api_format": "anthropic",
+      "auth_source": "anthropic_api_key",
+      "default_model": "claude-sonnet-4-6",
+      "base_url": null,
+      "last_model": null,
+      "credential_slot": null,
+      "allowed_models": [],
+      "context_window_tokens": null,
+      "auto_compact_threshold_tokens": null
+    },
+    "claude-subscription": {
+      "label": "Claude Subscription",
+      "provider": "anthropic_claude",
+      "api_format": "anthropic",
+      "auth_source": "claude_subscription",
+      "default_model": "claude-sonnet-4-6",
+      "base_url": null,
+      "last_model": null,
+      "credential_slot": null,
+      "allowed_models": [],
+      "context_window_tokens": null,
+      "auto_compact_threshold_tokens": null
+    },
+    "openai-compatible": {
+      "label": "OpenAI-Compatible API",
+      "provider": "openai",
+      "api_format": "openai",
+      "auth_source": "openai_api_key",
+      "default_model": "gpt-5.4",
+      "base_url": null,
+      "last_model": null,
+      "credential_slot": null,
+      "allowed_models": [],
+      "context_window_tokens": null,
+      "auto_compact_threshold_tokens": null
+    },
+    "codex": {
+      "label": "Codex Subscription",
+      "provider": "openai_codex",
+      "api_format": "openai",
+      "auth_source": "codex_subscription",
+      "default_model": "gpt-5.4",
+      "base_url": null,
+      "last_model": null,
+      "credential_slot": null,
+      "allowed_models": [],
+      "context_window_tokens": null,
+      "auto_compact_threshold_tokens": null
+    },
+    "copilot": {
+      "label": "GitHub Copilot",
+      "provider": "copilot",
+      "api_format": "copilot",
+      "auth_source": "copilot_oauth",
+      "default_model": "gpt-5.4",
+      "base_url": null,
+      "last_model": null,
+      "credential_slot": null,
+      "allowed_models": [],
+      "context_window_tokens": null,
+      "auto_compact_threshold_tokens": null
+    },
+    "moonshot": {
+      "label": "Moonshot (Kimi)",
+      "provider": "moonshot",
+      "api_format": "openai",
+      "auth_source": "moonshot_api_key",
+      "default_model": "kimi-k2.5",
+      "base_url": "https://api.moonshot.cn/v1",
+      "last_model": null,
+      "credential_slot": null,
+      "allowed_models": [],
+      "context_window_tokens": null,
+      "auto_compact_threshold_tokens": null
+    },
+    "gemini": {
+      "label": "Google Gemini",
+      "provider": "gemini",
+      "api_format": "openai",
+      "auth_source": "gemini_api_key",
+      "default_model": "gemini-2.5-flash",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "last_model": null,
+      "credential_slot": null,
+      "allowed_models": [],
+      "context_window_tokens": null,
+      "auto_compact_threshold_tokens": null
+    },
+    "minimax": {
+      "label": "MiniMax",
+      "provider": "minimax",
+      "api_format": "openai",
+      "auth_source": "minimax_api_key",
+      "default_model": "MiniMax-M2.7",
+      "base_url": "https://api.minimax.io/v1",
+      "last_model": null,
+      "credential_slot": null,
+      "allowed_models": [],
+      "context_window_tokens": null,
+      "auto_compact_threshold_tokens": null
+    },
+    "nvidia": {
+      "label": "NVIDIA NIM",
+      "provider": "nvidia",
+      "api_format": "openai",
+      "auth_source": "nvidia_api_key",
+      "default_model": "openai/gpt-oss-120b",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "last_model": "openai/gpt-oss-120b",
+      "credential_slot": null,
+      "allowed_models": [],
+      "context_window_tokens": null,
+      "auto_compact_threshold_tokens": null
+    },
+    "qwen": {
+      "label": "Qwen (DashScope)",
+      "provider": "dashscope",
+      "api_format": "openai",
+      "auth_source": "dashscope_api_key",
+      "default_model": "qwen-plus",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "last_model": null,
+      "credential_slot": null,
+      "allowed_models": [],
+      "context_window_tokens": null,
+      "auto_compact_threshold_tokens": null
+    },
+    "modelscope": {
+      "label": "ModelScope",
+      "provider": "modelscope",
+      "api_format": "openai",
+      "auth_source": "modelscope_api_key",
+      "default_model": "deepseek-ai/DeepSeek-V4-Flash",
+      "base_url": "https://api-inference.modelscope.cn/v1",
+      "last_model": null,
+      "credential_slot": null,
+      "allowed_models": [],
+      "context_window_tokens": null,
+      "auto_compact_threshold_tokens": null
+    }
+  },
+  "max_turns": 200,
+  "system_prompt": null,
+  "permission": {
+    "mode": "default",
+    "allowed_tools": [],
+    "denied_tools": [],
+    "path_rules": [],
+    "denied_commands": []
+  },
+  "hooks": {},
+  "memory": {
+    "enabled": true,
+    "max_files": 5,
+    "max_entrypoint_lines": 200,
+    "context_window_tokens": null,
+    "auto_compact_threshold_tokens": null
+  },
+  "sandbox": {
+    "enabled": false,
+    "backend": "srt",
+    "fail_if_unavailable": false,
+    "enabled_platforms": [],
+    "network": {
+      "allowed_domains": [],
+      "denied_domains": []
+    },
+    "filesystem": {
+      "allow_read": [],
+      "deny_read": [],
+      "allow_write": [
+        "."
+      ],
+      "deny_write": []
+    },
+    "docker": {
+      "image": "openharness-sandbox:latest",
+      "auto_build_image": true,
+      "cpu_limit": 0.0,
+      "memory_limit": "",
+      "extra_mounts": [],
+      "extra_env": {}
+    }
+  },
+  "enabled_plugins": {},
+  "allow_project_plugins": false,
+  "mcp_servers": {
+    "blender": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--python",
+        "3.11",
+        "blender-mcp"
+      ],
+      "env": {
+        "UV_PYTHON_PREFERENCE": "only-managed"
+      },
+      "cwd": null
+    },
+    "ton": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@ton/mcp"
+      ],
+      "env": {},
+      "cwd": null
+    },
+    "ton-docs": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://docs.ton.org/mcp"
+      ],
+      "env": {},
+      "cwd": null
+    },
+    "dune": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@dune/mcp-server"
+      ],
+      "env": {},
+      "cwd": null
+    },
+    "chrome-devtools": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "chrome-devtools-mcp"
+      ],
+      "env": {},
+      "cwd": null
+    },
+    "desktop-commander": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@pkulchenko/desktop-commander"
+      ],
+      "env": {},
+      "cwd": null
+    },
+    "exa": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "exa-mcp-server"
+      ],
+      "env": {},
+      "cwd": null
+    },
+    "posthog": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "posthog-mcp"
+      ],
+      "env": {},
+      "cwd": null
+    },
+    "greptile": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "greptile-mcp"
+      ],
+      "env": {},
+      "cwd": null
+    },
+    "telegram": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "telegram-mcp"
+      ],
+      "env": {},
+      "cwd": null
+    },
+    "discord": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "discord-mcp"
+      ],
+      "env": {},
+      "cwd": null
+    },
+    "mongodb": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mongodb-mcp"
+      ],
+      "env": {},
+      "cwd": null
+    },
+    "terraform": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "terraform-mcp"
+      ],
+      "env": {},
+      "cwd": null
+    },
+    "aws-core": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "aws-mcp"
+      ],
+      "env": {},
+      "cwd": null
+    },
+    "firecrawl": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "firecrawl-mcp"
+      ],
+      "env": {},
+      "cwd": null
+    },
+    "sourcegraph": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "sourcegraph-mcp"
+      ],
+      "env": {},
+      "cwd": null
+    },
+    "vercel": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "vercel-mcp"
+      ],
+      "env": {},
+      "cwd": null
+    },
+    "github": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "github-mcp"
+      ],
+      "env": {},
+      "cwd": null
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "playwright-mcp"
+      ],
+      "env": {},
+      "cwd": null
+    }
+  },
+  "theme": "default",
+  "output_style": "default",
+  "vim_mode": false,
+  "voice_mode": false,
+  "fast_mode": false,
+  "effort": "medium",
+  "passes": 1,
+  "verbose": false,
+  "vision": {
+    "model": "",
+    "api_key": "",
+    "base_url": ""
+  }
+}

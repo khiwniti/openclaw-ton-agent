@@ -1,0 +1,30 @@
+{
+  "name": "openclaw-ton-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Professional autonomous AI multi-agent TON trading system (OpenClaw orchestrator + ton-agent scanner + @ton/mcp custody).",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "scanner:dev": "npm --workspace packages/scanner run dev",
+    "scanner:start": "npm --workspace packages/scanner run start",
+    "exit:dev": "npm --workspace packages/exit-manager run dev",
+    "backtest": "npm --workspace packages/backtest run backtest",
+    "backtest:replay": "npm --workspace packages/backtest run replay",
+    "backtest:hyperopt": "npm --workspace packages/backtest run hyperopt",
+    "gateway:config": "node scripts/validate-openclaw-config.mjs",
+    "test": "npm test --workspaces --if-present",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "json5": "^2.2.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

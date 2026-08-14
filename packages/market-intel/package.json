@@ -1,0 +1,14 @@
+{
+  "name": "@openclaw-ton-agent/market-intel",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "test": "tsx --test src/*.test.ts"
+  },
+  "dependencies": {
+    "@openclaw-ton-agent/shared": "*"
+  }
+}

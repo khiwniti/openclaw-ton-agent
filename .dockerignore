@@ -1,0 +1,83 @@
+# ====================================================================
+# openclaw-ton-agent — .dockerignore
+# --------------------------------------------------------------------
+# Exclude files not needed in the Docker build context.
+# ====================================================================
+
+# Git
+.git
+.gitignore
+
+# IDE/OS
+.DS_Store
+.vscode
+.idea
+*.swp
+*.swo
+
+# Dependencies (installed fresh in Docker)
+node_modules
+.pnp
+.pnp.js
+
+# Build outputs (if any)
+dist
+build
+*.tsbuildinfo
+
+# Environment files (use Fly secrets instead)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Testing
+coverage
+.nyc_output
+
+# Temporary files
+tmp
+temp
+*.tmp
+
+# Documentation
+README.md
+docs/
+*.md
+!package.json
+
+# Development configs
+.eslintrc*
+.prettierrc*
+.tsconfig.json
+*.config.js
+*.config.ts
+
+# OpenClaw runtime state (generated at runtime)
+.openclaw
+.planning
+.remember
+.worktrees
+
+# Data directory (mounted as volume)
+data/
+
+# Scripts (copied but not needed at runtime if not used)
+scripts/validate-openclaw-config.mjs
+
+# Skills (source only, not runtime)
+skills/
+
+# Workspace directory (agent SOUL.md files, not needed at runtime)
+workspace/
+
+# Fly.io config (not needed inside container)
+fly.toml
+Dockerfile
+.dockerignore

@@ -1,0 +1,19 @@
+{
+  "name": "@openclaw-ton-agent/backtest",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "backtest": "tsx src/index.ts",
+    "replay": "tsx src/index.ts --replay --signals ../../data/signals-mainnet.ndjson",
+    "hyperopt": "tsx src/index.ts --hyperopt",
+    "test": "tsx --test src/*.test.ts"
+  },
+  "dependencies": {
+    "@openclaw-ton-agent/exit-manager": "*",
+    "@openclaw-ton-agent/risk-gates": "*",
+    "@openclaw-ton-agent/shared": "*"
+  }
+}

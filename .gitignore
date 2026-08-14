@@ -1,0 +1,35 @@
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Env & secrets
+.env
+.env.local
+.secrets/
+*.pem
+!*.example
+
+# OpenClaw runtime state
+~/.openclaw/
+.openclaw/agents/
+.openclaw/state/
+
+# Data & logs
+data/
+logs/
+*.db
+*.db-wal
+*.db-shm
+timescale/
+*.log
+
+# OS
+.DS_Store
+
+# Editors
+.idea/
+.vscode/
+
+# Transient harness session state
+.omo/run-continuation/
