@@ -62,10 +62,10 @@ npm run start &
 api_pid=$!
 echo "[STARTUP] API started (PID: $api_pid)"
 
-# Start scanner in background
+# Start scanner in background (scanner is read-only by construction)
 echo "[STARTUP] Starting scanner on port $PORT..."
 cd "$APP_DIR/packages/scanner"
-npm run start &
+OBSERVE_ONLY=true npm run start &
 scanner_pid=$!
 echo "[STARTUP] Scanner started (PID: $scanner_pid)"
 
