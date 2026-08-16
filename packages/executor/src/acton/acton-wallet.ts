@@ -59,19 +59,11 @@ export class ActonWallet implements WalletAdapter {
 
     try {
       const balanceTon = this.opts.balanceTon ?? Number.POSITIVE_INFINITY;
-      if (payload.side === "buy") {
-        const guard = evaluateBuyGasGuard(balanceTon, payload.amountTon);
-        if (!guard.ok) {
-          return this.bounced(order, guard.error);
-        }
-      } else {
-        const guard = evaluateSellGasGuard(balanceTon);
-        if (!guard.ok) {
-          return this.bounced(order, guard.error);
-        }
+      if (!Number.isFinite(balanceTon) || balanceTon <= 0) {
+        return this.bounced(order, `[buy] balance unavailable or empty: have=${(Number.isFinite(balanceTon) ? balanceTon : 0).toFixed(3)} TON`);
       }
 
-      if (payload.side === "buy" && order.expectedTokenQty < order.minOutTokenQty) {
+      if (payload.side === "buy" && (order.expectedTokenQty ?? 0) < (order.minOutTokenQty ?? 0)) {
         return this.bounced(order, "ActonWallet: quoted output below minOut after slippage");
       }
 
@@ -84,7 +76,7 @@ export class ActonWallet implements WalletAdapter {
         status: "pending_reconcile",
         txHash: send.txHash ?? null,
         filledAmountTon: payload.amountTon,
-        filledTokenQty: payload.side === "buy" ? order.expectedTokenQty : 0,
+        filledTokenQty: payload.side === "buy" ? (order.expectedTokenQty ?? 0) : (order.tokenQty ?? 0),
         minOutTokenQty: payload.minOutTokenQty,
         slippageBps: payload.slippageBps,
         mode: "auto",
@@ -100,9 +92,9 @@ export class ActonWallet implements WalletAdapter {
     return {
       side: order.side,
       jettonMaster: order.token.address,
-      amountTon: order.amountTon,
-      jettonAmountNano: order.expectedTokenQty.toString(),
-      minOutTokenQty: order.minOutTokenQty,
+      amountTon: order.amountTon ?? (order.expectedTon ?? 0),
+      jettonAmountNano: (order.expectedTokenQty ?? order.tokenQty ?? 0).toString(),
+      minOutTokenQty: order.minOutTokenQty ?? 0,
       slippageBps: order.slippageBps,
       dex: "stonfi",
     };

@@ -22,7 +22,15 @@ const log = createLogger("scanner");
 function pickSource() {
   const requested = process.env.SCANNER_SOURCE;
   if (requested === "replay") return replaySource;
-  if (requested === "tonapi" && SCANNER_CONFIG.tonapi.key) return tonapiSource;
+  if (requested === "tonapi") {
+    if (!SCANNER_CONFIG.tonapi.key) {
+      throw new Error(
+        "SCANNER_SOURCE=tonapi requires TONAPI_KEY or TON_API_KEY — " +
+          "deploy the key or set SCANNER_SOURCE=replay for fixture data."
+      );
+    }
+    return tonapiSource;
+  }
   if (!SCANNER_CONFIG.tonapi.key) return replaySource;
   return tonapiSource;
 }
