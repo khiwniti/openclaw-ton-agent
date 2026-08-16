@@ -1,109 +1,182 @@
 # Testing Patterns
 
-**Analysis Date:** [2026-08-14]
+**Analysis Date:** 2026-08-16
 
 ## Test Framework
 
-**Runner:**
-- Node.js built-in test runner (`node:test`) executed through `tsx` — no vitest, no jest
-- Config: none (no `jest.config.*` / `vitest.config.*` anywhere in the repo; tests run via CLI glob)
+**TypeScript / Node.js Runner:**
+- Runner: Node.js built-in test runner (`node:test`) executed directly via `tsx --test`.
+- Assertion Library: `node:assert/strict` (standard Node.js assertion library with deep equality).
+- No external heavy testing frameworks (no Jest, Vitest, or Mocha required).
 
-**Assertion Library:**
-- `node:assert/strict` (imported alongside `node:test`)
+**Smart Contract Test Runner:**
+- Runner: Acton CLI (`acton test`).
+- Target: Native Tolk test files located in `tests/*.test.tolk` testing contracts in `contracts/*.tolk`.
 
 **Run Commands:**
+
 ```bash
-npm test --workspaces --if-present   # Run all 7 package suites (root)
-tsx --test src/*.test.ts             # Run one package's suite (run inside that package dir)
-tsc --noEmit                         # Typecheck gate (root) — run before/with tests
+# Run all workspace package test suites
+npm test --workspaces --if-present
+
+# Run a specific package's test suite
+npm --workspace packages/risk-gates run test
+# OR inside a package directory:
+tsx --test 'src/**/*.test.ts'
+
+# Run with watch mode (supported in packages/api and packages/orchestration)
+npm --workspace packages/api run test:watch
+
+# Compile & Typecheck validation gate (all packages)
+npm run typecheck
+```
+
+```bash
+# Smart contract test execution (Acton)
+acton test
 ```
 
 ## Test File Organization
 
 **Location:**
-- Colocated with source: every suite lives next to its module as `src/*.test.ts` (e.g. `packages/shared/src/signal.test.ts` beside `packages/shared/src/signal.ts`)
+- Colocated with source code: `packages/<name>/src/<module>.test.ts` (e.g. `packages/risk-gates/src/gates.test.ts`).
+- Dedicated `__tests__` directories: `packages/<name>/src/__tests__/<module>.test.ts` used in `packages/api` and `packages/orchestration` (e.g. `packages/api/src/__tests__/decisions.test.ts`, `packages/orchestration/src/__tests__/gate.test.ts`).
+- Smart Contract tests: `tests/<ContractName>.test.tolk`.
 
 **Naming:**
-- `*.test.ts` suffix — 17 test files across the 7 packages; no `*.spec.ts`
+- Unit & integration tests: `*.test.ts`.
+- Contract tests: `*.test.tolk`.
 
-**Structure:**
-```
-packages/<name>/src/<module>.test.ts   # tests for packages/<name>/src/<module>.ts
-```
+## Test Structure & Patterns
 
-## Test Structure
+**Basic Test Structure:**
 
-**Suite Organization:**
-- Flat `test()` calls from `node:test` — one `test()` per scenario; no describe/it nesting detected
-
-**Patterns:**
-- Per-file factory helpers at top of suite: `env()` / `ctx()` in `packages/risk-gates/src/gates.test.ts` build typed option objects per case
-- Shared helper per suite: `tempJournal()` in `packages/scanner/src/pipeline.test.ts` creates a temp-directory journal and returns the journal plus its path
-- Deterministic fixed inputs, never random data
-
-## Mocking
-
-**Framework:** None — no sinon/vitest/jest mocks; doubles are hand-rolled with Node stdlib
-
-**Patterns:**
 ```typescript
-// packages/scanner/src/signal-out.test.ts — in-process HTTP mock server
-import { createServer } from "node:http";
-// server binds an ephemeral port; test records (method, path, headers, body)
-// and asserts on them; requests are bounded with AbortSignal.timeout(5_000)
+import test from "node:test";
+import assert from "node:assert/strict";
+import { evaluateGates } from "../src/gates.js";
+import type { IngestedEnvelope, GateContext } from "@openclaw-ton-agent/shared";
+
+test("evaluateGates returns pass for valid low-risk envelope", () => {
+  const envelope: IngestedEnvelope = {
+    id: "sig_test_1",
+    timestamp: Date.now(),
+    jettonMaster: "EQB3ncyBUTjZUA5EnFKR5_EnOMI9V1tTEAAPaiU71gc4TiUt",
+    score: { hard: 100, soft: 85 },
+    priceTon: 1.5,
+    liquidityTon: 5000,
+    volume24hTon: 12000,
+    poolAddress: "EQD...",
+    dex: "dedust",
+  };
+
+  const ctx: GateContext = {
+    now: Date.now(),
+    cooldowns: new Map(),
+    openPositions: [],
+    drawdownPct: 5,
+    killSwitchFlipped: false,
+    bankrollTon: 100,
+  };
+
+  const result = evaluateGates(envelope, ctx);
+  assert.equal(result.verdict, "pass");
+  assert.ok(result.sizeTon > 0);
+});
 ```
 
-**What to Mock:**
-- External HTTP endpoints (a local `node:http` server stands in for the SIGNAL_OUT_URL webhook; HMAC `X-Agent-Secret` header is asserted)
-- Filesystem via temp dirs: `fs.mkdtempSync` for journal fixtures (`packages/shared/src/journal.test.ts`)
+## Mocking Strategies
 
-**What NOT to Mock:**
-- Domain logic — scoring, gating, validation, journaling all run for real against fixtures
-- `fetch` is not mocked; `TONAPI_KEY` absence is handled by env control — `packages/scanner/src/audit.test.ts` expects `ok: false` plus flag `"audit_source_unavailable"` ("the audit must fail soft — never fabricate")
+**1. In-Process HTTP Mock Servers (`node:http`):**
+Used for testing outgoing webhooks and external API endpoints without hitting live services:
+
+```typescript
+// Example from packages/scanner/src/signal-out.test.ts
+import { createServer } from "node:http";
+
+test("signal-out posts webhook with HMAC header", async () => {
+  const server = createServer((req, res) => {
+    assert.equal(req.method, "POST");
+    assert.ok(req.headers["x-agent-secret"]);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const port = (server.address() as any).port;
+
+  // Exercise signal-out against http://127.0.0.1:${port}
+  server.close();
+});
+```
+
+**2. Temporary Filesystem Journals (`fs.mkdtempSync`):**
+Used for testing append-only NDJSON journaling and rotation without mutating production `data/` files:
+
+```typescript
+// Example from packages/shared/src/journal.test.ts
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+
+function createTempJournalDir(): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-test-"));
+}
+```
+
+**3. In-Memory SQLite Databases:**
+Tests for `packages/storage` instantiate fresh SQLite databases using `:memory:` or temporary disk files to guarantee isolation between tests.
 
 ## Fixtures and Factories
 
-**Test Data:**
-```typescript
-// packages/scanner/src/pipeline.test.ts — replay envelopes keyed by master address
-// "EQA-replay-alpha", "EQB-replay-beta", "EQC-replay-gamma", "EQD-replay-delta"
-// fed through runScanTick({ source, journal, emit, seen }); dedupe proven by seeding
-// the `seen` Set with an already-emitted master address
-```
+**Test Fixtures:**
+- Deterministic synthetic market data and klines in `packages/backtest/src/fixture.ts`.
+- Recorded mainnet signal stream sample in `packages/scanner/data/signals-mainnet.ndjson`.
 
-**Location:**
-- Inline in the test file — no separate `__fixtures__` directory detected
-
-## Coverage
-
-**Requirements:** None enforced — no coverage threshold or coverage script in root or package manifests
-
-**View Coverage:** Not configured
+**Factory Functions:**
+- Suites define local factory functions (e.g. `makeEnvelope()`, `makeGateContext()`, `makeOrderRequest()`) to populate valid default objects while allowing tests to override specific fields.
 
 ## Test Types
 
-**Unit Tests:**
-- Default and dominant: pure-logic suites for scoring (`packages/scanner/src/score.test.ts`), validation (`packages/shared/src/signal.test.ts`), gating (`packages/risk-gates/src/gates.test.ts`), journaling (`packages/shared/src/journal.test.ts`)
+### 1. Unit Tests (Pure Logic)
+- **Scope:** Risk gate math (`packages/risk-gates`), Kelly position sizing (`kelly.ts`), Chandelier stop-loss math (`packages/exit-manager/src/position.ts`), slippage & min-out calculations (`packages/dex/src/router.ts`), ID generators (`packages/shared/src/newid.ts`).
+- **Characteristics:** Fast, synchronous, 100% deterministic, zero network dependencies.
 
-**Integration Tests:**
-- Mock-server suites: `packages/scanner/src/signal-out.test.ts` (HTTP + HMAC header), `packages/scanner/src/pipeline.test.ts` (multi-envelope replay through a scan tick, journal rows revalidated with `status: "validated"`), `packages/risk-gates/src/macro-feed.test.ts` (POST + `accept: application/json`, abort forwarding, fail-closed default)
+### 2. Integration Tests
+- **Scope:** Fastify route endpoints (`packages/api/src/__tests__/*`), scanner pipeline ticks (`packages/scanner/src/pipeline.test.ts`), Redis agent bus dispatch (`packages/agents/src/bus.ts`), continuous runner tick loops.
+- **Characteristics:** Spawns ephemeral in-memory servers or local SQLite databases, exercises async pipelines end-to-end.
 
-**E2E Tests:**
-- Not used
+### 3. Smart Contract Tests
+- **Scope:** Native Tolk smart contract behavior, internal message dispatch, state cell serialization.
+- **Characteristics:** Executed in the Acton TVM simulator via `acton test`.
 
-## Common Patterns
+## Common Testing Patterns
 
-**Async Testing:**
+**Async Testing & Timeouts:**
 ```typescript
-// async test() with real awaits; network calls bounded by AbortSignal.timeout(5_000)
-test("...", async () => { /* await real async work */ });
+test("async pipeline completes within timeout", async () => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2000);
+
+  try {
+    const res = await runScanTick({ signal: controller.signal });
+    assert.ok(res.ok);
+  } finally {
+    clearTimeout(timeout);
+  }
+});
 ```
 
-**Error Testing:**
-- Assert outcomes rather than thrown exceptions: soft-fail contracts such as `{ sent: false, reason: "HTTP 500" }` (`signal-out.test.ts`), `ok: false` + `audit_source_unavailable` (`audit.test.ts`), fail-closed risk defaults (`macro-feed.test.ts`)
-- Validation rejects via `assert.throws` on `validateEnvelope` / `validateIngested` inputs — negative price, empty address, score > 100 (`packages/shared/src/signal.test.ts`)
-- Scoring asserted as ranges, not exact numbers: `risk >= 95` (all-false inputs), `risk >= 40` (partial data), `risk >= 30` (all-null, no pool) in `packages/scanner/src/score.test.ts`
+**Boundary & Error Testing:**
+```typescript
+test("validates envelope rejects invalid address", () => {
+  assert.throws(
+    () => validateEnvelope({ id: "123", jettonMaster: "invalid-address" }),
+    /Invalid/
+  );
+});
+```
 
 ---
 
-*Testing analysis: 2026-08-14*
+*Testing analysis: 2026-08-16*

@@ -1,169 +1,233 @@
-<!-- refreshed: 2026-08-14 -->
+<!-- refreshed: 2026-08-16 -->
 # Architecture
 
-**Analysis Date:** 2026-08-14
+**Analysis Date:** 2026-08-16
 
 ## System Overview
 
 ```text
-┌──────────────────────────────────────────────────────────────────────┐
-│                        Personas (Agent Workspaces)                    │
-│  `workspace/trader-ui/`  `workspace/risk-analyst/`  `workspace/scanner-ops/`  │
-│  `workspace/executor/`   `workspace/market-intel/`                          │
-│  (5 isolated agents; executor is the ONLY write/exec-capable agent)    │
-└───────────────────────────┬──────────────────────────────────────────┘
-                            │ A2A messaging (scanner → gated executor)
-                            ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                    Execution Pipeline (Packages)                      │
-│  `packages/scanner/` → `packages/market-intel/` → `packages/risk-gates/` │
-│  → `packages/executor/` → `packages/exit-manager/` → on-chain settlement │
-│  parallel: `packages/backtest/` (validation)  `packages/shared/` (types) │
-└───────────────────────────┬──────────────────────────────────────────┘
-                            ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  Store / Output                                                     │
-│  `data/paper-orders.ndjson`  `data/gated-mainnet.ndjson`            │
-│  `data/eval-report.json`  SQLite (`SQLITE_PATH=/app/data/agent.db`) │
-└──────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                               OPERATOR & CONTROL PLANE (L5 / L6)                       │
+│  Fastify API (`packages/api`) [Port 3000] ── WebSocket (`/ws`) ── Telegram (`trader-ui`)│
+└─────────────────────────────────────────┬──────────────────────────────────────────────┘
+                                          │
+                                          ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                              AGENT ORCHESTRATION & BUS                                 │
+│  OpenClaw Gateway (`openclaw/openclaw.json`) ── 5 Personas (scanner-ops, market-intel, │
+│  risk-analyst, executor, trader-ui) ── Redis Event Bus (`packages/agents/src/bus.ts`) │
+│  Orchestration State Graph & Tier Coordinator (`packages/orchestration`)               │
+└───────────────┬─────────────────────────────────────────────────────────▲──────────────┘
+                │ A2A Event Stream                                        │ State Sync
+                ▼                                                         │
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                         SIGNAL INGESTION & MARKET INTEL (L1 / L2)                       │
+│  `packages/scanner` (TonAPI Radar / Sniper) ── Audit & Score (`packages/security`)    │
+│  `packages/market-intel` (Regime detection, ATR volatility, whale watching)           │
+└─────────────────────────────────────────┬──────────────────────────────────────────────┘
+                                          │ IngestedEnvelope (sig_*)
+                                          ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                       DETERMINISTIC RISK GATES & SIZING (L3)                           │
+│  `packages/risk-gates` (G0 Kill Switch → G1 Drawdown → G2 Cooldown → G3 Portfolio      │
+│  → G4 Sizing / Kelly fraction → G5 Sniper trigger) [Outranks any LLM verdict]          │
+└─────────────────────────────────────────┬──────────────────────────────────────────────┘
+                                          │ GatedEnvelope (env_*)
+                                          ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                         EXECUTION & ROUTING ENGINE (L4)                                │
+│  `packages/executor` (OrderBuilder, ActonWallet, WalletContractV5R1, PaperEngine)      │
+│  `packages/dex` (STON.fi & DeDust AMM Routers, MinOut / Slippage Guards)               │
+│  `contracts/Counter.tolk` / Acton Toolchain (Smart contract execution layer)           │
+└─────────────────────────────────────────┬──────────────────────────────────────────────┘
+                                          │ OrderRequest (ord_*) / FillResult
+                                          ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                     POSITION MANAGEMENT & EXIT LIFECYCLE                               │
+│  `packages/exit-manager` (TPSL, Chandelier Trailing Stop, Supertrend Flip, Time Stops) │
+└─────────────────────────────────────────┬──────────────────────────────────────────────┘
+                                          │
+                                          ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                         PERSISTENCE & VALIDATION ENGINE                                │
+│  SQLite (`packages/storage` via `better-sqlite3` WAL) ── NDJSON Journals (`packages/   │
+│  shared`) ── Backtest Replay & Hyperopt Engine (`packages/backtest`)                   │
+└────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Component Responsibilities
 
-| Component | Responsibility | File |
-|-----------|----------------|------|
-| Personas | 5 isolated agents (trader-ui, executor, risk-analyst, market-intel, scanner-ops); each has own `AGENTS.md` + `SOUL.md` | `workspace/*/{AGENTS.md,SOUL.md}` |
-| Skills | 9 local skills (ton-signal-ingest, ton-risk-gates, ton-reporting, ton-execute, ton-settlement, ton-exit-modes, ton-tpsl-manager, ton-audit, ton-manual-override) encode gates G1–G4, execution modes, TPSL rules | `skills/*/SKILL.md` |
-| Scanner | Signal ingestion; read-only by construction | `packages/scanner/src/index.ts` |
-| Market Intel | Volatility / regime analysis | `packages/market-intel/src/index.ts` (+ `vol.ts`) |
-| Risk Gates | Gate checks G1–G4 (live trading paused until expectancy positive) | `packages/risk-gates/src/index.ts` (+ `gates.ts`, `kelly.ts`, `point-setup.ts`, `macro-feed.ts`, `run-gated-feed.ts`) |
-| Executor | Execute orders via gates; mode discipline (`OBSERVE_ONLY=true` in production) | `packages/executor/src/index.ts` |
-| Exit Manager | TPSL exits (ton-tpsl-manager, ton-exit-modes) | `packages/exit-manager/src/index.ts` |
-| Backtest | Paper simulation, metrics, hyperopt, drift/replay validation | `packages/backtest/src/index.ts` (+ `engine.ts`, `paper.ts`, `report.ts`, `metrics.ts`, `hyperopt.ts`, `replay.ts`, `ledger.ts`, `drift.ts`, `fetch.ts`, `fixture.ts`) |
-| Shared | Common types/utilities | `packages/shared/src/index.ts` |
+| Component | Responsibility | File / Path |
+|-----------|----------------|-------------|
+| **API Control Plane** | Fastify v5 HTTP server, health checks (`/health/*`), decision queries, and real-time WebSocket telemetry | `packages/api/src/index.ts`, `packages/api/src/routes/*` |
+| **Agent Bus & Personas** | Redis pub/sub message router (`AgentBus`) and base agent lifecycle classes | `packages/agents/src/bus.ts`, `packages/agents/src/base.ts` |
+| **Orchestration Graph** | LangGraph-style trade state machine, supervisor node, and capital tier coordinator | `packages/orchestration/src/graph.ts`, `packages/orchestration/src/coordinator.ts` |
+| **Scanner & Ingestion** | Polls TonAPI for newly minted jettons and large liquidity pools; computes initial safety scores | `packages/scanner/src/pipeline.ts`, `packages/scanner/src/tonapi.ts` |
+| **Market Intelligence** | Classifies market regimes, computes ATR-based volatility, and monitors whale balance changes | `packages/market-intel/src/regime.ts`, `packages/market-intel/src/vol.ts`, `packages/market-intel/src/whales.ts` |
+| **Security & Audits** | On-chain contract bytecode inspection, honeypot detection, mintable/admin checks | `packages/security/src/audit.ts`, `packages/security/src/pool-resolver.ts` |
+| **Risk Gates** | Deterministic gate pipeline (G0-G5), circuit breaker drawdown checks, and Kelly position sizing | `packages/risk-gates/src/gates.ts`, `packages/risk-gates/src/circuit-breaker.ts`, `packages/risk-gates/src/kelly.ts` |
+| **Executor** | Transforms gated decisions into executable blockchain transactions; supports Paper and Live modes | `packages/executor/src/index.ts`, `packages/executor/src/order-builder.ts`, `packages/executor/src/continuous.ts` |
+| **Acton Wallet** | Interacts with smart contract wallets, validates gas guards, and computes minimum token output | `packages/executor/src/acton/acton-wallet.ts`, `packages/executor/src/acton/gas-guard.ts` |
+| **DEX Router** | Calculates optimal swap routes and slippage tolerances across STON.fi and DeDust AMM pools | `packages/dex/src/router.ts` |
+| **Exit Manager** | Tracks open positions, calculates dynamic Chandelier trailing stops, and triggers TPSL exits | `packages/exit-manager/src/position.ts`, `packages/exit-manager/src/decide.ts` |
+| **Storage** | Synchronous WAL-mode SQLite database storing positions, daily PnL, decision records, and wallet metadata | `packages/storage/src/store.ts` |
+| **Shared Core** | Core Zod schemas, envelope models, ID generation (`newId`), and rotated append-only NDJSON journaling | `packages/shared/src/schemas.ts`, `packages/shared/src/journal.ts`, `packages/shared/src/signal.ts` |
+| **Backtesting Engine** | Historical market data fetcher, fee modeling, parameter grid search (Hyperopt), and drift monitoring | `packages/backtest/src/engine.ts`, `packages/backtest/src/hyperopt.ts`, `packages/backtest/src/drift.ts` |
+| **Smart Contracts** | Native Tolk smart contracts compiled and tested using the Acton CLI toolchain | `contracts/Counter.tolk`, `Acton.toml` |
 
 ## Pattern Overview
 
-**Overall:** Multi-agent orchestration with a gate-driven execution pipeline.
+**Overall Pattern:** Event-Driven, Multi-Agent Autonomous Pipeline with Deterministic Guardrails.
 
 **Key Characteristics:**
-- 5 isolated persona agents coordinate via agent-to-agent (A2A) messaging
-- `scripts/validate-openclaw-config.mjs` enforces that only `executor` may have write capability
-- Decisions 1–7 locked (`docs/architecture.md` §15); edge gates G1–G4 binding
-- Live trading paused until measured expectancy is positive (`data/eval-report.json`: `validateAvgExpectancyTon: 2.5891` for best backtest mode)
-- Production runs with `EXECUTION_MODE=trade` + `OBSERVE_ONLY=true`
+1. **Separation of Cognitive and Execution Authority:** LLMs / Agents propose ideas and analyze regimes, but deterministic code (Risk Gates G0-G5, Tier Coordinator, Safety Caps) strictly controls all fund movements and signing.
+2. **Fail-Closed Gate Design:** If an external feed fails, API rate limits trigger, or market volatility spikes beyond thresholds, the gate defaults to `reject` or `halt`.
+3. **Single Execution Persona:** OpenClaw capability rules enforce that ONLY the `executor` persona possesses `exec` / `write` tools; all other agents are strictly read-only observers.
+4. **Append-Only Event Journaling:** Every signal, gated decision, order, fill, and agent bus dispatch is written to rotated NDJSON logs for full replayability.
 
 ## Layers
 
-**Persona Layer:**
-- Purpose: Agent identity, capabilities, and isolation
-- Location: `workspace/`
-- Contains: `AGENTS.md`, `SOUL.md` per agent
-- Depends on: skills (referenced by name in `openclaw/openclaw.json`)
-- Used by: `openclaw` runtime (`agents.defaults` + per-agent entries)
+**1. Presentation & Control Layer (`packages/api`):**
+- Fastify server exposing REST routes (`/api/decisions`, `/health/ready`) and `/ws` WebSocket stream.
+- Consumes `packages/storage` and provides health probes for Fly.io.
 
-**Skill Layer:**
-- Purpose: Domain procedures (signal ingest, risk gates, execution, settlement, exits, TPSL, audit, manual override)
-- Location: `skills/`
-- Contains: `SKILL.md` per skill
-- Depends on: package code
-- Used by: personas
+**2. Agent & Orchestration Layer (`packages/agents`, `packages/orchestration`, `openclaw/`):**
+- Redis-based `AgentBus` distributing events between isolated processes.
+- OpenClaw persona definitions configuring tool permissions and A2A allowlists.
+- `TierCoordinator` tracking capital allocations (low: 1 TON, mid: 3 TON, high: 5 TON).
 
-**Package Layer:**
-- Purpose: Executable domain logic
-- Location: `packages/`
-- Contains: `scanner`, `shared`, `executor`, `exit-manager`, `market-intel`, `risk-gates`, `backtest`
-- Depends on: each other (scanner → market-intel → risk-gates → executor → exit-manager)
-- Used by: skills and personas
+**3. Ingestion & Market Intelligence Layer (`packages/scanner`, `packages/market-intel`, `packages/security`):**
+- Real-time scanner pulling from TonAPI, performing bytecode checks, and generating `IngestedEnvelope`.
+- Market intel annotating envelopes with volatility (`volPct`), regime, and whale flow indicators.
 
-**Data Layer:**
-- Purpose: Persistent state and paper/live records
-- Location: `data/`
-- Contains: `paper-orders.ndjson`, `gated-mainnet.ndjson`, `eval-report.json`; SQLite at `SQLITE_PATH=/app/data/agent.db`
+**4. Deterministic Risk & Decision Layer (`packages/risk-gates`):**
+- Evaluates G0 (Kill Switch), G1 (20% Max Drawdown Circuit Breaker), G2 (Token Cooldown), G3 (Sector & Portfolio Limits), G4 (Kelly Sizing & Minimum R:R), G5 (Sniper Liquidity Thresholds).
+- Emits `GatedEnvelope` with `verdict: "pass" | "reject" | "halt"`.
+
+**5. Execution & Routing Layer (`packages/executor`, `packages/dex`, `packages/wallet`):**
+- Converts passed envelopes into `OrderRequest` objects.
+- In `paper` mode, simulates fills using `packages/backtest` fee models.
+- In `auto` (live) mode, routes swaps through STON.fi / DeDust AMMs or Acton smart contracts.
+
+**6. Position Lifecycle & Exits Layer (`packages/exit-manager`):**
+- Monitors open positions against tick updates.
+- Executes dynamic exit strategies: Take-Profit, Break-Even Stop (+2x fee coverage), Chandelier Trailing Stop, and Supertrend Reversal Flips.
+
+**7. Persistence & Analytics Layer (`packages/storage`, `packages/shared`, `packages/backtest`):**
+- SQLite tables: `positions`, `daily_pnl`, `decision_journal`, `agentic_wallets`.
+- Rotated NDJSON journals (`signals-*.ndjson`, `orders-*.ndjson`, `fills-*.ndjson`).
+- Backtest engine running replay verification and parameter hyperoptimization.
 
 ## Data Flow
 
-### Primary Request Path (Signal → Gated Execution)
+### Primary Signal-to-Execution Flow
 
-1. `scanner-ops` persona ingests on-chain signal (via `ton-signal-ingest` skill + `packages/scanner/src/index.ts`)
-2. Signal sent via A2A to `executor` (only write/exec-capable agent)
-3. `executor` runs gate checks G1–G4 (`packages/risk-gates/src/index.ts`, `gates.ts`) — gated envelope carries `meta.gate{verdict, tier, sizeTon, rRatio, expectedValueTon, cooldownUntil, reasons}` (see `data/gated-mainnet.ndjson`: `source:"audit"`, verdict `"reject"`)
-4. Execution mode decides target: paper (`data/paper-orders.ndjson`, `ord_*` ids, `source:"paper-sim"`) or live
-5. `exit-manager` applies TPSL exits (`ton-tpsl-manager`, `ton-exit-modes`)
-6. Settlement recorded (`ton-settlement` skill)
+```text
+1. [Scanner Tick] (packages/scanner/src/pipeline.ts)
+   └── Discovers token via TonAPI → runs safety audit (packages/security/src/audit.ts)
+       → generates IngestedEnvelope with unique ID `sig_*`
 
-### Secondary Flow (Validation/Backtest)
+2. [Market Annotation] (packages/market-intel/src/annotate.ts)
+   └── Adds market regime, ATR volatility, and whale delta percentages
 
-1. `packages/backtest/src/index.ts` runs paper engine (`engine.ts`, `paper.ts`)
-2. Hyperopt (`hyperopt.ts`) searches grid (best mode: diamond `volPct:0.08`/`rrTarget:4`)
-3. Metrics + report (`metrics.ts`, `report.ts`) → `data/eval-report.json`
-4. Replay/drift checks (`replay.ts`, `drift.ts`) validate candidate before live enablement
+3. [Risk Gate Evaluation] (packages/risk-gates/src/gates.ts)
+   └── Checks Kill Switch → Drawdown → Cooldown → Portfolio Caps → Kelly Sizing
+       → outputs GatedEnvelope with `meta.gate{verdict, sizeTon, rRatio, reasons}`
 
-**State Management:**
-- NDJSON append logs in `data/` for orders and gated signals
-- SQLite for agent state (`SQLITE_PATH=/app/data/agent.db`)
-- OpenClaw state dir `OPENCLAW_STATE_DIR=/app/data/.openclaw`
+4. [Tier Coordination & Graph Check] (packages/orchestration/src/coordinator.ts)
+   └── Validates balance, tier limits, and active position counts
+
+5. [Order Construction & Routing] (packages/executor/src/order-builder.ts)
+   └── Computes minimum output with slippage bounds (packages/dex/src/router.ts)
+       → generates OrderRequest `ord_*`
+
+6. [Transaction Execution] (packages/executor/src/acton/acton-wallet.ts / wallet.ts)
+   └── Submits swap message to TON blockchain (or records paper fill)
+
+7. [Position Registration] (packages/exit-manager/src/position.ts)
+   └── Opens position record in SQLite (`packages/storage/src/store.ts`)
+
+8. [Exit Monitoring Loop] (packages/exit-manager/src/decide.ts)
+   └── Evaluates price against Chandelier Stop Loss / Take Profit → triggers exit
+```
+
+### Secondary Backtesting & Hyperopt Flow
+
+```text
+1. [Data Ingestion] (packages/backtest/src/fetch.ts)
+   └── Pulls historical daily/hourly candle series from Binance & CoinGecko
+
+2. [Simulation Loop] (packages/backtest/src/engine.ts)
+   └── Feeds historical bars through scanner, gates, and exit manager with fee routing
+
+3. [Hyperopt Grid Search] (packages/backtest/src/hyperopt.ts)
+   └── Explores volatility/RR parameter space to identify optimal expectancy configurations
+
+4. [Report Generation] (packages/backtest/src/report.ts)
+   └── Computes Sharpe, Sortino, max drawdown, and outputs evaluation report JSON
+```
 
 ## Key Abstractions
 
-**Gated Envelope:**
-- Purpose: A signal + gate verdict + sizing decision, passed between scanner and executor
-- Examples: `data/gated-mainnet.ndjson`, `data/paper-orders.ndjson` (`gatedEnvelopeId env_*`)
-- Pattern: annotated envelope (`meta.annotation{regime, regimeConfidence, curveBand, whale, whaleDeltaPct, sentiment, sources}`) + `meta.gate`
-
-**Execution Mode:**
-- Purpose: Paper vs live routing with observation-only safety
-- Examples: `EXECUTION_MODE=trade`, `OBSERVE_ONLY=true` in `fly.toml`; `data/paper-orders.ndjson` (`amountTon:20`, `slippageBps:200`, `tier:"low"`, rRatio ~5.0)
+- `IngestedEnvelope` (`packages/shared/src/signal.ts`): Standardized signal representation containing token metadata, initial price, liquidity, and safety score.
+- `GatedEnvelope` (`packages/shared/src/schemas.ts`): Signal envelope enriched with deterministic risk gate evaluation, sizing decisions, and execution reasons.
+- `TradeDecision` (`packages/shared/src/trade-decision.ts`): Orchestrator-level decision record bridging market analysis to concrete order intent.
+- `Position` (`packages/exit-manager/src/position.ts`): State model of an active trade tracking entry price, remaining quantity, high-water mark, trailing stop, and exit triggers.
+- `OrderRequest` (`packages/shared/src/order.ts`): Concrete trade order payload specifying side, jetton master address, TON amount, min-out tokens, and slippage ceiling.
+- `FillResult` (`packages/executor/src/acton/acton-wallet.ts`): Immutable record of trade execution status (`filled`, `bounced`, `pending_reconcile`), transaction hash, and executed price.
+- `GateContext` (`packages/risk-gates/src/gates.ts`): Ephemeral and historical risk state (bankroll, active drawdown %, sector exposure, cooldown map).
+- `AgentMessage` (`packages/shared/src/schemas.ts`): Inter-agent message envelope containing routing headers (`from`, `to`, `kind`, `cycleId`) and payload data.
 
 ## Entry Points
 
-**Package entry points:**
-- Location: `packages/*/src/index.ts` (7 packages; 64 `.ts` files under `packages/*/src/` incl. tests)
-- Triggers: invoked by skills/personas
-- Responsibilities: each package's domain boundary
+**Production Unified Entry Point:**
+- `scripts/start-unified.sh`: Container bootstrap script that launches Fastify API (port 3000), Scanner (port 8080), Risk Gates, and Executor (port 8081) with SIGTERM/SIGINT process handling.
 
-**Agent entry points:**
-- Location: `openclaw/openclaw.json` (`agents.defaults` + per-agent `workspace`/`skills`)
-- Triggers: agent runtime startup
-- Responsibilities: agent identity, skill wiring, capability grants/denies
+**Individual Package Entry Points:**
+- `packages/api/src/index.ts`: Fastify HTTP/WebSocket server.
+- `packages/scanner/src/index.ts`: Signal ingestion scanner loop.
+- `packages/risk-gates/src/continuous.ts`: Continuous gated signal processor.
+- `packages/executor/src/continuous.ts`: Continuous order executor and fill reconciler.
+- `packages/agents/src/index.ts`: Agent bus subscriber.
+- `packages/backtest/src/index.ts`: Backtest simulation, replay, and hyperopt runner.
 
 ## Architectural Constraints
 
-- **Threading:** Single-threaded agent runtime; A2A messaging is the coordination channel
-- **Global state:** `GATES_G1_G3_ACK=0` — live wallet refuses until explicitly acknowledged; live trading paused until expectancy positive
-- **Capability isolation:** Only `executor` may have `write`/`edit`/`apply_patch`/`exec`; scanner and market-intel deny `write/edit/apply_patch/exec/browser/cron` (validated by `scripts/validate-openclaw-config.mjs`)
-- **Circuit breaker:** `CIRCUIT_BREAKER_DRAWDOWN_PCT=20`; kill switch secret (`KILL_SWITCH_URL`) available
-- **Tier caps:** `MAX_OPEN_POSITIONS_PER_TIER=3`
+1. **Deterministic Gate Priority:** LLM reasoning is strictly advisory; deterministic risk gate functions in `packages/risk-gates` hold unconditional veto and sizing authority.
+2. **Single Writer Principle:** Only `packages/executor` (and the `executor` persona) may hold on-chain private keys or execute swap transactions.
+3. **Observation-Only Production Default:** Default configuration sets `OBSERVE_ONLY=true` and `EXECUTION_MODE=notify_only`; live on-chain execution requires explicit acknowledgement (`GATES_G1_G3_ACK=1`).
+4. **Drawdown Circuit Breakers:** Global 20% drawdown breach immediately freezes new position entries.
+5. **Database Concurrency:** SQLite is configured with WAL mode (`journal_mode = WAL`) in `packages/storage/src/store.ts` for safe multi-process reading.
 
-## Anti-Patterns
+## Anti-Patterns to Avoid
 
-### Per-Agent Capability Drift
+### 1. Direct LLM-to-Chain Execution
+- **What happens:** An LLM agent generates and submits transactions directly to the TON blockchain.
+- **Why it's wrong:** High risk of hallucinations, incorrect sizing, or slippage exploitation.
+- **Do this instead:** Route all proposed trades through `evaluateGates` in `packages/risk-gates` and `OrderBuilder` in `packages/executor`.
 
-**What happens:** Persona configs can be edited to grant write/exec to more agents.
-**Why it's wrong:** The whole security model (only executor acts on-chain) collapses.
-**Do this instead:** Run `scripts/validate-openclaw-config.mjs` after any `openclaw/openclaw.json` change; it fails unless only `executor` has write capability and `tools.agentToAgent.enabled` is true with all EXPECTED_AGENTS allowed.
+### 2. Bypassing Safety Caps with Raw Swaps
+- **What happens:** Executing swaps via `packages/dex` without querying the `TierCoordinator` or `evaluateTradeGate`.
+- **Why it's wrong:** Violates position count and per-tier capital limits.
+- **Do this instead:** Always execute through `TierCoordinator.executeForTier` (`packages/orchestration/src/coordinator.ts`).
 
-### Unvalidated Mode Flip
+### 3. Relative Cross-Package Imports
+- **What happens:** Importing across packages using `../../packages/shared/src/...`.
+- **Why it's wrong:** Breaks package encapsulation and TypeScript project references.
+- **Do this instead:** Import via workspace package names (e.g. `import { logger } from "@openclaw-ton-agent/core"`).
 
-**What happens:** Setting `OBSERVE_ONLY=false` before expectancy is proven.
-**Why it's wrong:** Live trading is paused until measured expectancy positive (`data/eval-report.json`).
-**Do this instead:** Keep `OBSERVE_ONLY=true` in production; only enable live after `packages/backtest/` reports positive expectancy (e.g., `validateAvgExpectancyTon: 2.5891` for the winning diamond mode) and gates G1–G4 pass on real signals.
+## Error Handling & Resilience
 
-## Error Handling
-
-**Strategy:** Fail-safe with hard external tripwires.
-
-**Patterns:**
-- Kill switch (external webhook secret `KILL_SWITCH_URL`) halts execution
-- Circuit breaker at 20% drawdown (`CIRCUIT_BREAKER_DRAWDOWN_PCT`)
-- Gate rejections persist `cooldownUntil` + `reasons` in `meta.gate` (`data/gated-mainnet.ndjson`)
+- **Fail-Closed Risk Logic:** If external market feeds (e.g. Binance macro feed) time out or return errors, the gate returns `{ riskOff: true }` or blocks execution.
+- **Gas & Slippage Guards:** All swaps compute `minOutTokenQty` with strict BPS caps (`computeMinOut`) before constructing messages.
+- **Process Supervision:** `scripts/start-unified.sh` traps `SIGTERM`/`SIGINT` to gracefully terminate child PIDs (`kill -TERM "$api_pid" "$scanner_pid" ...`).
 
 ## Cross-Cutting Concerns
 
-**Logging:** NDJSON append logs in `data/` (`paper-orders.ndjson`, `gated-mainnet.ndjson`)
-**Validation:** `scripts/validate-openclaw-config.mjs` (workspace + skills + capability + A2A + skill-file assertions); backtest drift/replay checks
-**Authentication:** Secrets via Fly secrets (TONCENTER_API_KEY, DATABASE_URL, PUBLIC_WEBHOOK_URL, KILL_SWITCH_URL) — never in source
+- **Logging:** Structured logging using `packages/core/src/logger.ts` with timestamped JSON envelopes.
+- **Validation:** Runtime Zod validation on every external boundary (REST inputs, WebSocket payloads, on-chain trace data, NDJSON entries).
+- **Security:** Strict separation of duties, environment-variable-only secret injection, and non-root Docker execution (UID 1001).
 
 ---
 
-*Architecture analysis: 2026-08-14*
+*Architecture analysis: 2026-08-16*

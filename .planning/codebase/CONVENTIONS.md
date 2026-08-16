@@ -1,80 +1,126 @@
 # Coding Conventions
 
-**Analysis Date:** [2026-08-14]
+**Analysis Date:** 2026-08-16
 
-## Repo Layout & Workspace Conventions
+## Workspace Architecture & Package Conventions
 
-- npm workspaces monorepo. All runtime code lives under `packages/<pkg>/src/`; each package has its own `package.json`, and the root `package.json` wires the workspace scripts (`test`, `typecheck`, `scanner:dev`, `backtest`, etc.).
-- Cross-package imports go through the workspace package name, never relative paths: `import { validateEnvelope } from "@openclaw-ton-agent/shared"` (see `packages/scanner/src/pipeline.ts`).
-- Root `tsconfig.json` compiles every package's `packages/**/src/**/*.ts` plus root scripts with `strict`, `noEmit`, `noUnusedLocals`, `noUnusedParameters`, `noFallthroughCasesInSwitch`, `moduleResolution: bundler`, `target: ES2022`, `lib: ES2023`. Add new source only under a package `src/` tree so it is type-checked by `npm run typecheck` (`tsc --noEmit`).
-- No bundler or framework: plain TypeScript executed by `tsx` (devDependency at the root, `tsx ^4.19.2`). Node `>=26.0.0` (root `engines`).
+- **Monorepo Structure:** Managed via npm workspaces across 15 packages in `packages/*`. Each package contains an independent `package.json` with an explicit `src/index.ts` public boundary.
+- **Cross-Package Imports:** Cross-package imports MUST ALWAYS use the workspace package name (e.g. `import { validateEnvelope } from "@openclaw-ton-agent/shared"` or `import { logger } from "@openclaw-ton-agent/core"`). Relative imports across package boundaries (e.g. `../../shared/src/...`) are strictly prohibited.
+- **TypeScript Configuration:** Root `tsconfig.json` compiles all `packages/**/src/**/*.ts` with strict compiler flags:
+  - `strict: true`
+  - `noEmit: true`
+  - `noUnusedLocals: true`
+  - `noUnusedParameters: true`
+  - `noFallthroughCasesInSwitch: true`
+  - `moduleResolution: "bundler"`
+  - `target: "ES2022"`, `lib: ["ES2023"]`
+- **Zero-Build Execution:** Plain TypeScript is executed directly via `tsx` across development, test running, and Docker production runtime without intermediate transpilation artifacts.
 
 ## Naming Patterns
 
-**Files:**
-- Source modules: camelCase, `packages/scanner/src/pipeline.ts`, `packages/shared/src/signal.ts`.
-- Test files: `<module>.test.ts` colocated next to the module, `packages/shared/src/signal.test.ts`.
-- Packages and top-level dirs: kebab-case, `@openclaw-ton-agent/risk-gates`, `packages/shared`.
-- Root scripts: kebab-case with explicit `.mjs`, `scripts/validate-openclaw-config.mjs`.
+**Files & Directories:**
+- TypeScript source modules: kebab-case or camelCase (e.g. `order-builder.ts`, `circuit-breaker.ts`, `macro-feed.ts`, `pipeline.ts`).
+- Test files: colocated `<module>.test.ts` or placed in `src/__tests__/<module>.test.ts`.
+- Package folders: kebab-case (e.g. `risk-gates`, `exit-manager`, `market-intel`).
+- Smart contracts: PascalCase for Tolk contracts (e.g. `Counter.tolk`, `Counter.test.tolk`).
+- Script files: kebab-case with appropriate extension (e.g. `start-unified.sh`, `validate-openclaw-config.mjs`).
 
-**Functions:**
-- camelCase verbs: `validateEnvelope`, `postSignal`, `runScanTick`, `newOrderId`.
-- Domain nouns describe the object being built: `newId(prefix)` in `packages/shared/src/newid.ts`, `tempJournal()` in `packages/scanner/src/pipeline.test.ts`.
+**Functions & Methods:**
+- camelCase verbs describing the exact action: `evaluateGates`, `validateEnvelope`, `runScanTick`, `computeMinOut`, `openPosition`, `buildGramSupervisorGraph`.
+- Factory and builder functions: `makeClient`, `makeSafetyCapsNode`, `newId`, `build`.
 
 **Types & Interfaces:**
-- PascalCase, often zod-inferred rather than hand-written: `export type IngestedEnvelope = z.infer<typeof envelopeSchema>` in `packages/shared/src/signal.ts`.
-- Result shapes use a `{ ok, ... }` or `{ sent, id, reason?, error? }` discriminator: `AuditResult`, `SignalOutResult`, `ScanTickResult`.
+- PascalCase for all types, interfaces, and Zod schemas: `IngestedEnvelope`, `GatedEnvelope`, `TradeDecision`, `Position`, `GateContext`, `FillResult`, `SwapRequest`.
+- Zod schema constants: camelCase or PascalCase ending with `Schema` (e.g. `envelopeSchema`, `orderRequestSchema`, `OrderSideSchema`).
 
-**Constants:**
-- UPPER_SNAKE_CASE for module-level literals: `OrderSideSchema = z.literal("buy")`, `BURN_PREFIXES` in `packages/scanner/src/audit.ts`, `ExecutionModeSchema = z.enum(["notify_only", "paper", "auto"])` in `packages/shared/src/order.ts`.
+**Constants & Enum-like Values:**
+- Module-level constants: `UPPER_SNAKE_CASE` (e.g. `GATE_CONFIG`, `DB_PATH`, `DEFAULT_DECISION_INTERVAL_MS`).
+- Enum-style string literals (lowercase unions, not TypeScript `enum`):
+  - Trade sides: `"buy" | "sell"`
+  - Gate verdicts: `"pass" | "reject" | "halt"`
+  - Execution modes: `"notify_only" | "paper" | "auto"`
+  - Exit modes: `"snipe" | "swing" | "gamble" | "diamond"`
+  - DEX platforms: `"stonfi" | "dedust"`
 
-**Enum-style values:**
-- lowercase strings, not TS enums: `"notify_only" | "paper" | "auto"`, `"stonfi" | "dedust"`, `"radar" | "x1000" | "audit" | "pool" | "manual"` (deduced from fixtures and schemas). Keep new values lowercase so they serialize cleanly into NDJSON.
+## Code Style & Formatting
 
-## Code Style
+**Indentation & Syntax:**
+- 2-space indentation throughout all TypeScript and JSON files.
+- Double quotes or single quotes used consistently per package file.
+- Semicolons are optional but consistent within each module.
+- Trailing commas enabled for multiline object and array literals.
 
-**Formatting:** No Prettier config present — format by hand to match the surrounding file (2-space indent, single quotes, trailing commas on multiline calls). Run `npm run typecheck` after edits as the lint-equivalent gate; there is no ESLint config in the repo.
+**Lint & Compile Gate:**
+- Run `npm run typecheck` (`tsc --noEmit`) as the primary compilation and type-safety gate. Any unused variable or parameter will immediately fail the check due to strict flags.
 
-**Imports:**
-- `import type` for type-only imports; runtime imports stay separate.
-- Order: external/workspace packages first (`@openclaw-ton-agent/shared`, `node:test`, `node:http`), then local modules, each group sorted alphabetically.
-- Import only what is used — `noUnusedLocals`/`noUnusedParameters` fail the build otherwise.
+## Import Organization
 
-**JSDoc:**
-- Every module starts with a one-line JSDoc header describing its responsibility (`packages/scanner/src/pipeline.ts`, `packages/shared/src/journal.ts`).
-- Interfaces and exported function options get per-field JSDoc (see `PipelineOpts` in `packages/scanner/src/pipeline.ts`).
+Imports follow a strict 4-tier hierarchy separated by blank lines:
+
+```typescript
+// 1. Node.js built-in modules (with node: prefix)
+import fs from "node:fs";
+import path from "node:path";
+
+// 2. External third-party dependencies
+import { Address, beginCell, toNano } from "@ton/ton";
+import { z } from "zod";
+
+// 3. Monorepo workspace packages
+import { logger } from "@openclaw-ton-agent/core";
+import { type IngestedEnvelope, validateEnvelope } from "@openclaw-ton-agent/shared";
+
+// 4. Local package-relative imports
+import { GATE_CONFIG } from "./config.js";
+import { pointSetup } from "./point-setup.js";
+```
+
+- Type-only imports MUST use `import type { ... }` or inline `import { type Foo }` to ensure clean tree-shaking and runtime separation.
 
 ## Validation & Type Safety
 
-- Zod is the validation primitive everywhere. Schema first, then `z.infer` for the type:
+- **Schema-First Design:** All external data (API request bodies, WebSocket messages, on-chain trace responses, NDJSON journal entries) must be validated with Zod at the application boundary before entering internal logic.
+- **Inferred Types:** Derive TypeScript types directly from Zod schemas using `z.infer<typeof schema>` to maintain a single source of truth (`packages/shared/src/schemas.ts`, `packages/shared/src/signal.ts`).
+- **No Data Fabrication:** Missing numeric fields are represented as `null` (e.g. `priceTon: number | null`), never fabricated as `0` or estimated unless explicitly derived by an intelligence node.
+
+## Error Handling Patterns
+
+- **Structured Result Objects:** Domain functions return structured result discriminators (`{ ok: boolean, error?: string, ... }` or `{ verdict: "pass" | "reject" | "halt", reasons: string[] }`) rather than throwing unexpected exceptions:
   ```typescript
-  // packages/shared/src/signal.ts
-  export const envelopeSchema = z.object({ /* ... */ });
-  export type IngestedEnvelope = z.infer<typeof envelopeSchema>;
-  export function validateEnvelope(value: unknown): IngestedEnvelope { ... }
+  export interface SwapResult {
+    ok: boolean;
+    txHash?: string;
+    amountTokens?: number;
+    error?: string;
+  }
   ```
-- Unknown input is parsed at the boundary (HTTP bodies, JSONL rows) and rejected with explicit messages, e.g. `"journal: value is not JSON-serializable"` in `packages/shared/src/journal.ts`.
-- Optional numeric fields are nullable (`priceTon: number | null`) rather than optional-and-missing; the shared policy is "never fabricate" missing data — see `packages/shared/src/signal.ts` and the `audit`/`score` tests.
+- **Fail-Closed Risk Gate Philosophy:** When risk calculations encounter network timeouts, missing data feeds, or unexpected errors, the gates MUST default to halting or rejecting the trade:
+  ```typescript
+  // If macro feed fails, fail closed with safe default
+  if (!feedResponse.ok) {
+    return { riskOff: true, reason: "macro_feed_unreachable" };
+  }
+  ```
+- **Explicit Timeout Guards:** Asynchronous external network calls must always be bounded with `AbortSignal.timeout(ms)` to prevent hanging promises in event loops.
 
-## Error Handling
+## Logging & Telemetry
 
-- Functions return structured results instead of throwing for expected failures: `postSignal` returns `{ sent: false, reason: "SIGNAL_OUT_URL not set" | "HTTP ${status}" | "network error" }` (`packages/scanner/src/signal-out.ts`).
-- External polling fails closed: `packages/risk-gates/src/macro-feed.ts` falls back to `{ riskOff: false, reason: "", timestamp: 0 }` on error/abort so a broken feed never silently disables risk gates.
-- Hard failure modes are explicit and auditable: the audit path reports `ok: false` with a `flags` entry like `"audit_source_unavailable"` when `TONAPI_KEY` is absent (`packages/scanner/src/audit.ts`).
-- Timeouts via `AbortSignal.timeout(5_000)` and abort forwarding, not raw `setTimeout` races (`packages/scanner/src/signal-out.ts`).
+- **Structured Logging:** Use `logger` from `@openclaw-ton-agent/core`:
+  ```typescript
+  import { logger } from "@openclaw-ton-agent/core";
 
-## Logging & Persistence
+  logger.info("SCANNER", `Ingested signal: ${envelope.id} for token ${envelope.jettonMaster}`);
+  logger.warn("RISK_GATE", `Trade rejected: ${reasons.join(", ")}`);
+  logger.error("EXECUTOR", `Swap execution failed`, err);
+  ```
+- **Immutable NDJSON Audit Trails:** Critical lifecycle events (signals, risk decisions, orders, fills, agent messages) are appended to rotated NDJSON journals via `Journal` (`packages/shared/src/journal.ts`) and SQLite (`packages/storage/src/store.ts`).
 
-- No logging framework — structured NDJSON append-only journal files. See `packages/shared/src/journal.ts`: `journalPath()` derives `signals-<network>.ndjson`, `maxBytes` defaults to 16MB, and rotation renames to `<file>.1` on overflow.
-- Out-of-band events are journaled as tagged records, e.g. `{ kind: "scan.error", source: source.name, error: msg }` on list failure in `packages/scanner/src/pipeline.ts`.
-- Env vars are read at module scope and referenced by name (e.g. `SCANNER_CONFIG` with `tonapi.key`, `SIGNAL_OUT_URL`, `TONAPI_KEY`); do not commit values, only names.
+## Module & Function Design
 
-## Module Design
-
-- Named exports only — no default exports anywhere in the packages.
-- Small focused modules per concern: `signal.ts`, `order.ts`, `journal.ts`, `newid.ts` in `packages/shared/src/`; `gates.ts`, `macro-feed.ts`, `kelly.ts`, `point-setup.ts` in `packages/risk-gates/src/`.
-- Pure helpers are exported for testing (`validateIngested`, `newId`, `runScanTick`) so tests exercise the real code path with seeded inputs.
+- **Named Exports Exclusively:** Default exports are avoided in package source files; all modules use explicit named exports (`export function evaluateGates(...)`, `export class ActonWallet(...)`).
+- **Options Objects for Extensibility:** Functions taking more than 2 parameters should accept a typed options object (e.g. `GateContext`, `PipelineOpts`, `ActonWalletOptions`).
+- **Pure Helpers vs State Managers:** Pure calculation logic (e.g. `chandelierStop`, `sizedPositionTon`, `computeMinOut`) is isolated in separate pure functions for straightforward unit testing.
 
 ---
 
-*Convention analysis: 2026-08-14*
+*Convention analysis: 2026-08-16*
