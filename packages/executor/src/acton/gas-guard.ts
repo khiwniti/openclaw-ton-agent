@@ -5,7 +5,7 @@ export const SELL_GAS_FLOOR_TON = Number(process.env.DEX_SELL_GAS_FLOOR_TON ?? "
 export const BANKROLL_FLOOR_TON = Number(process.env.DEX_BANKROLL_FLOOR_TON ?? "1.0");
 
 export function effectiveBuyReserveTon(): number {
-  return Math.max(EXIT_RESERVE_TON, BANKROLL_FLOOR_TON);
+  return EXIT_RESERVE_TON;
 }
 
 export interface GasGuardResult {

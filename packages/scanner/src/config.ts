@@ -66,7 +66,7 @@ export const SCANNER_CONFIG = {
   scanLimit: num("SCAN_LIMIT", 30),
 
   tonapi: {
-    key: str("TONAPI_KEY"),
+    key: str("TONAPI_KEY", str("TON_API_KEY")),
     base: process.env.TONAPI_BASE ?? "https://tonapi.io",
     maxConcurrent: num("TONAPI_MAX_CONCURRENT", 4),
     minGapMs: num("TONAPI_MIN_GAP_MS", 170),
