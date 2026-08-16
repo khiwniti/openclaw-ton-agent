@@ -6,9 +6,15 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {
-    "test": "tsx --test src/*.test.ts"
+    "test": "vitest run src/*.test.ts",
+    "daemon": "tsx src/daemon.ts"
   },
   "dependencies": {
-    "@openclaw-ton-agent/shared": "*"
+    "@openclaw-ton-agent/shared": "*",
+    "@openclaw-ton-agent/backtest": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "vitest": "^2.1.8"
   }
 }
