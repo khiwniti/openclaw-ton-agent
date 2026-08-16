@@ -4,8 +4,7 @@
  * off-chain poll-based (architecture §9); stepPosition is called on a poll
  * loop with the latest price.
  */
-;
-
+import type { ExitMode } from "./position";
 export interface PartialTake {
   /** Price gain (fraction of entry) that triggers this partial take. */
   triggerPct: number;

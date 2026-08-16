@@ -10,8 +10,8 @@ import ws from "./routes/ws.js"
 export async function build() {
   const app = Fastify({
     logger: { level: process.env.LOG_LEVEL || "info" },
+    ignoreTrailingSlash: true,
   })
-
   await app.register(cors)
   await app.register(helmet)
   await app.register(rateLimit, { global: true, max: 200, timeWindow: "1 minute" })

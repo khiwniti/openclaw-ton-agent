@@ -25,7 +25,8 @@ const tonapiSourceImpl: ScannerSource = {
       masters.map((master) => fetchPoolForMaster(master))
     );
 
-    const poolByMaster = new Map<string, { pool: any; price: any }>();
+    type PoolInfo = { master: string; pool: any; priceTon: number | null; liquidityTon: number | null; curvePct: number | null };
+    const poolByMaster = new Map<string, PoolInfo>();
     for (const p of pools) {
       if (p) poolByMaster.set(p.master, p);
     }

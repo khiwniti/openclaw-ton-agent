@@ -17,8 +17,8 @@
  * - Close-confirmation SL (candle close, not wick)
  * - Volatility regime filter (widen SL when ATR spikes, reduce size)
  */
-;
-import { modeConfig, type PartialTake } from "./modes";
+import { modeConfig } from "./modes";
+import type { Position, TrendState } from "./position";
 
 export type ExitAction = 
   | "hold" 
@@ -30,8 +30,8 @@ export type ExitAction =
   | "partial_tp" 
   | "trend_reversal"
   | "ladder_exit"
-  | "structure_sl";
-
+  | "structure_sl"
+  | "blocked";
 export interface StepResult {
   action: ExitAction;
   exitPriceTon: number | null;

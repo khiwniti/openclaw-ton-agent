@@ -79,7 +79,7 @@ export const SCANNER_CONFIG = {
     sharedSecret: str("SIGNAL_OUT_SHARED_SECRET"),
   },
 
-  journalDir: str("JOURNAL_DIR", "./data"),
+  journalDir: str("JOURNAL_DIR", str("DATA_DIR", "./data")),
 } as const;
 
 if (!SCANNER_CONFIG.observeOnly) {

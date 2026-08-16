@@ -6,21 +6,35 @@ import { ExecutorAgent } from "./executor.js"
 import { TraderUiAgent } from "./ui.js"
 
 async function main() {
-  let bus: AgentBus | null = null;
-  try {
-    const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
-    bus = new AgentBus(redis);
-    await bus.start();
-  } catch (err) {
-    console.warn("[agents] Redis unavailable, running without agent bus", err);
+  let bus: AgentBus
+  const redisUrl = process.env.REDIS_URL
+  if (redisUrl && redisUrl !== "none" && redisUrl !== "disabled") {
+    try {
+      const redis = new Redis(redisUrl, {
+        lazyConnect: true,
+        maxRetriesPerRequest: 1,
+        retryStrategy: () => null,
+        enableOfflineQueue: false,
+      })
+      redis.on("error", () => {})
+      await redis.connect()
+      bus = new AgentBus(redis)
+      await bus.start()
+      console.log("[agents] connected to Redis agent bus")
+    } catch {
+      console.warn("[agents] Redis unavailable, running in-memory agent bus")
+      bus = new AgentBus(null)
+    }
+  } else {
+    bus = new AgentBus(null)
   }
 
-  const scanner = new MarketScannerAgent(bus ?? ({} as any));
-  const risk = new RiskAnalystAgent(bus ?? ({} as any));
-  const executor = new ExecutorAgent(bus ?? ({} as any));
-  const ui = new TraderUiAgent(bus ?? ({} as any));
+  const scanner = new MarketScannerAgent(bus)
+  const risk = new RiskAnalystAgent(bus)
+  const executor = new ExecutorAgent(bus)
+  const ui = new TraderUiAgent(bus)
 
-  console.log(`[agents] active personas: ${[scanner, risk, executor, ui].map((a) => a.name).join(", ")}`);
+  console.log(`[agents] active personas: ${[scanner, risk, executor, ui].map((a) => a.name).join(", ")}`)
 }
 
 main().catch((err) => {

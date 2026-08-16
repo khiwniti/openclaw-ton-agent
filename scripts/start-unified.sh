@@ -6,10 +6,16 @@ set -e
 
 echo "[STARTUP] Starting unified scanner + executor container"
 
-# Ensure data directory exists
-mkdir -p /app/data
-chown -R appuser:appgroup /app/data 2>/dev/null || true
+APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
+# Ensure data directory exists
+export DATA_DIR=${DATA_DIR:-/app/data}
+export JOURNAL_DIR=${JOURNAL_DIR:-$DATA_DIR}
+export GATED_DIR=${GATED_DIR:-$DATA_DIR}
+export SQLITE_PATH=${SQLITE_PATH:-$DATA_DIR/agent.db}
+export OPENCLAW_STATE_DIR=${OPENCLAW_STATE_DIR:-$DATA_DIR/.openclaw}
+mkdir -p "$DATA_DIR" "$OPENCLAW_STATE_DIR"
+chown -R appuser:appgroup "$DATA_DIR" 2>/dev/null || true
 # Export environment for both processes
 export NODE_ENV=${NODE_ENV:-production}
 export OBSERVE_ONLY=${OBSERVE_ONLY:-true}
@@ -20,18 +26,22 @@ export SCANNER_ENABLED=${SCANNER_ENABLED:-true}
 export SNIPER_ENABLED=${SNIPER_ENABLED:-true}
 export EXECUTION_MODE=${EXECUTION_MODE:-notify_only}
 export GATES_G1_G3_ACK=${GATES_G1_G3_ACK:-0}
-export GATED_DIR=${GATED_DIR:-/app/data}
-export ORDERS_OUT=${ORDERS_OUT:-/app/data/orders-mainnet.ndjson}
-export FILLS_OUT=${FILLS_OUT:-/app/data/fills-mainnet.ndjson}
+export GATED_DIR=${GATED_DIR:-$DATA_DIR}
+export ORDERS_OUT=${ORDERS_OUT:-$DATA_DIR/orders-${TON_NETWORK}.ndjson}
+export FILLS_OUT=${FILLS_OUT:-$DATA_DIR/fills-${TON_NETWORK}.ndjson}
 export EXEC_HEALTH_PORT=${EXEC_HEALTH_PORT:-8081}
+export API_PORT=${API_PORT:-3000}
+export API_HOST=${API_HOST:-0.0.0.0}
 
 # Health check ports
 export PORT=${PORT:-8080}  # Scanner health port
 
 echo "[STARTUP] Configuration:"
+echo "  Network: $TON_NETWORK"
+echo "  API port: $API_PORT"
 echo "  Scanner health port: $PORT"
 echo "  Executor health port: $EXEC_HEALTH_PORT"
-echo "  Gated directory: $GATED_DIR"
+echo "  Data / Gated directory: $GATED_DIR"
 echo "  Execution mode: $EXECUTION_MODE"
 
 # Function to handle shutdown
@@ -43,35 +53,35 @@ shutdown() {
   exit 0
 }
 
-trap shutdown SIGINT SIGTERM
+trap shutdown INT TERM
 
 # Start API first for HTTP health checks
 echo "[STARTUP] Starting API on port $API_PORT..."
-cd /app/packages/api
+cd "$APP_DIR/packages/api"
 npm run start &
 api_pid=$!
 echo "[STARTUP] API started (PID: $api_pid)"
 
 # Start scanner in background
 echo "[STARTUP] Starting scanner on port $PORT..."
-cd /app/packages/scanner
+cd "$APP_DIR/packages/scanner"
 npm run start &
 scanner_pid=$!
 echo "[STARTUP] Scanner started (PID: $scanner_pid)"
 
 # Start continuous risk gates in background
 echo "[STARTUP] Starting continuous risk gates..."
-cd /app/packages/risk-gates
+cd "$APP_DIR/packages/risk-gates"
 npm run continuous &
 gates_pid=$!
 echo "[STARTUP] Risk gates started (PID: $gates_pid)"
 
 # Give services a moment to bind ports
-sleep 8
+sleep 4
 
 # Start executor in background
 echo "[STARTUP] Starting executor on port $EXEC_HEALTH_PORT..."
-cd /app/packages/executor
+cd "$APP_DIR/packages/executor"
 npm run continuous &
 executor_pid=$!
 echo "[STARTUP] Executor started (PID: $executor_pid)"

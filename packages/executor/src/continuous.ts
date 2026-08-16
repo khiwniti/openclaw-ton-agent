@@ -72,8 +72,9 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
 
   const executor = new Executor({ mode, ordersJournal, fillsJournal, surface, wallet: walletForMode(mode) });
 
-  // Track processed files to avoid reprocessing
+  // Track processed lines per file to handle continuously appending journals
   const processedFiles = new Set<string>();
+  const processedLines = new Map<string, number>();
 
   // Health server
   let healthServer: ReturnType<typeof createHealthServer> | null = null;
@@ -86,13 +87,15 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
 
   const processFile = async (filePath: string) => {
     const fileName = path.basename(filePath);
-    if (processedFiles.has(fileName)) return;
-
-    log.info("processing gated file", { fileName });
+    const startLine = processedLines.get(fileName) ?? 0;
     const rows = readJournal(filePath);
+    if (rows.length <= startLine) return;
+
+    log.info("processing gated file", { fileName, fromLine: startLine, totalLines: rows.length });
     let fileOrders = 0;
 
-    for (const row of rows) {
+    for (let i = startLine; i < rows.length; i++) {
+      const row = rows[i];
       const parsed = validateIngested(row);
       if (!parsed.ok) continue;
       const env = parsed.value;
@@ -111,8 +114,6 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
       const res = await executor.submit(orderOrErr);
       if (res.action === "executed" || res.action === "booked") liveTradeCount++;
       fileOrders++;
-      ordersJournal.append(orderOrErr);
-      if (res.fill) fillsJournal.append({ orderId: orderOrErr.id, ...res.fill });
       log.info("order processed", {
         action: res.action,
         ticker: res.order.token.ticker,
@@ -123,11 +124,14 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
       });
     }
 
-    processedFiles.add(fileName);
-    stats.processedFiles++;
+    processedLines.set(fileName, rows.length);
+    if (!processedFiles.has(fileName)) {
+      processedFiles.add(fileName);
+      stats.processedFiles++;
+    }
     stats.totalOrders += fileOrders;
     stats.lastProcessedAt = Date.now();
-    log.info("completed gated file", { fileName, orders: fileOrders });
+    log.info("completed gated file", { fileName, newOrders: fileOrders, totalOrders: stats.totalOrders });
   };
 
   const scanAndProcess = async () => {

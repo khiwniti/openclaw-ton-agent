@@ -1,13 +1,14 @@
-
-
-
-
+import { buildGramSupervisorGraph } from "./graph.js"
 import { executionNode, makeAuthorizedExecution } from "./nodes/execution.js"
 
 
 
 export async function runDemoCycle() {
-  const graph = buildGramSupervisorGraph(() => ({ killSwitchActive: false, dailyLossBreached: false }))
+  const graph = buildGramSupervisorGraph(() => ({
+    killSwitchActive: false,
+    dailyLossBreached: false,
+    tier: { balanceTon: 10, openPositions: 0, maxOpen: 3, maxPositionTon: 5 },
+  }))
   const state = await graph.run({
     cycle_id: `cycle-${Date.now()}`,
     tier: "low",
