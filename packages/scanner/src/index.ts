@@ -9,13 +9,15 @@
  *   - no TONAPI_KEY           → replay fallback
  *   - otherwise               → live TONAPI source
  */
-import { Journal, journalPath } from "@openclaw-ton-agent/shared";
+import { Journal, journalPath, createLogger } from "@openclaw-ton-agent/shared";
 import { SCANNER_CONFIG, assertLiveDataSource } from "./config";
 import { replaySource } from "./replay";
 import { tonapiSource } from "./tonapi-source";
 import { runScanTick } from "./pipeline";
 import { SeenCache } from "./seen";
 import { createStats, startHealthServer } from "./health";
+
+const log = createLogger("scanner");
 
 function pickSource() {
   const requested = process.env.SCANNER_SOURCE;
@@ -62,24 +64,31 @@ export function startScanner(
       stats.totals.emitted += result.emitted;
       stats.totals.incomplete += result.incomplete;
       stats.totals.dropped += result.dropped;
-      console.log(
-        `[SCANNER:${source.name}] scanned=${result.scanned} emitted=${result.emitted} incomplete=${result.incomplete} dropped=${result.dropped} tracked=${seen.size}`
-      );
+      log.info("scan tick complete", {
+        scanned: result.scanned,
+        emitted: result.emitted,
+        incomplete: result.incomplete,
+        dropped: result.dropped,
+        tracked: seen.size,
+      });
       return result;
     } catch (e) {
       // An unhandled rejection here would kill the process under Node 15+.
       // Record it, let /health report it, and keep the loop alive.
       stats.lastError = (e as Error)?.message ?? String(e);
-      console.error(`[SCANNER:${source.name}] tick failed: ${stats.lastError}`);
+      log.error("scan tick failed", e as Error);
       return undefined;
     }
   };
 
-  console.log(
-    `[SCANNER] ${SCANNER_CONFIG.network.toUpperCase()} • source=${source.name} • observeOnly=${SCANNER_CONFIG.observeOnly} • journal=${journal.filePath}`
-  );
+  log.info("scanner started", {
+    network: SCANNER_CONFIG.network,
+    source: source.name,
+    observeOnly: SCANNER_CONFIG.observeOnly,
+    journal: journal.filePath,
+  });
   if (source.name === "replay") {
-    console.warn(`[SCANNER] WARNING: fixture data — signals are NOT real market data.`);
+    log.warn("fixture data mode — signals are NOT real market data");
   }
 
   const server = opts.health ? startHealthServer({ stats, intervalMs }) : null;
@@ -109,7 +118,7 @@ if (process.argv[1] && process.argv[1].endsWith("index.ts")) {
   // shutdown stops being reported as `npm error code 130`.
   for (const sig of ["SIGINT", "SIGTERM"] as const) {
     process.on(sig, () => {
-      console.log(`[SCANNER] received ${sig}, shutting down`);
+      log.info("shutdown signal received", { signal: sig });
       scanner.stop();
       process.exit(0);
     });

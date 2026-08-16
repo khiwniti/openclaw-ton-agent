@@ -53,9 +53,9 @@ export interface ReplayOutcome {
   metrics: BacktestMetrics;
 }
 
-export function loadSignals(file: string): IngestedEnvelope[] {
+export function loadSignals(file: string, max = Number.MAX_SAFE_INTEGER): IngestedEnvelope[] {
   const out: IngestedEnvelope[] = [];
-  for (const raw of readJournal(file)) {
+  for (const raw of readJournal(file, max)) {
     const v = validateIngested(raw);
     if (v.ok) out.push(v.value);
   }

@@ -1,7 +1,9 @@
-export { SignalEnvelopeSchema, IngestedEnvelopeSchema, ChainSchema, DexSchema, EnvelopeSourceSchema, validateEnvelope, validateIngested } from "./signal";
-export type { SignalEnvelope, IngestedEnvelope, Chain, Dex, EnvelopeSource } from "./signal";
-export { newId } from "./newid";
-export { Journal, readJournal, journalPath } from "./journal";
-export type { JournalOptions } from "./journal";
-export { ExecutionModeSchema, OrderSideSchema, OrderRequestSchema, validateOrderRequest, newOrderId } from "./order";
-export type { ExecutionMode, OrderSide, OrderRequest } from "./order";
+export { Journal, readJournal, journalPath, journalEventId } from "./journal.js"
+export type { JournalOptions } from "./journal.js"
+export { SignalEnvelopeSchema, IngestedEnvelopeSchema, validateEnvelope, validateIngested, newId, newOrderId } from "./schemas.js"
+export { validateOrderRequest } from "./order.js"
+export { createLogger } from "./logger.js"
+export type { SignalEnvelope, IngestedEnvelope, AgentMessage } from "./schemas.js"
+export type { OrderRequest, ExecutionMode, OrderSide } from "./order.js"
+export type { TradeDecision } from "./trade-decision.js"
+export type { Logger, LogLevel, LogContext } from "./logger.js"

@@ -7,6 +7,9 @@ import { newId } from "@openclaw-ton-agent/shared";
 
 export type ExitMode = "snipe" | "swing" | "gamble" | "diamond";
 
+/** Trend state for Supertrend/Chandelier logic */
+export type TrendState = "uptrend" | "downtrend" | "unknown";
+
 export interface Position {
   id: string;
   orderId: string;
@@ -16,8 +19,13 @@ export interface Position {
   entryTon: number;
   /** token qty = amountTon / entryTon. */
   qty: number;
+  /** remaining qty after partial exits. */
+  remainingQty: number;
   /** TON capital committed. */
   amountTon: number;
+  /** Initial stop loss (structure-based). */
+  initialStopLossTon: number;
+  /** Dynamic stop loss (Chandelier/ATR trailing). */
   stopLossTon: number;
   takeProfitTon: number;
   entryTs: number;
@@ -26,12 +34,38 @@ export interface Position {
   feesTon: number;
   /** highest price seen since entry. */
   highWaterTon: number;
-  /** trailing stop once armed; null until price reaches the activation level. */
+  /** lowest price seen since entry (for short positions). */
+  lowWaterTon: number;
+  /** Chandelier/ATR trailing stop. */
   trailingStopTon: number | null;
   /** break-even stop (moves SL to entry) once armed. */
   breakEvenAtTon: number | null;
+  /** Supertrend/Parabolic SAR flip price - trend reversal trigger. */
+  trendFlipPrice: number | null;
+  /** Current trend state. */
+  trendState: TrendState;
+  /** ATR value at entry (for volatility reference). */
+  atrAtEntry: number;
+  /** Swing low/high for structure-based SL. */
+  swingLow: number | null;
+  swingHigh: number | null;
   /** hard time-stop; null = no time-stop (diamond). */
   timeStopMs: number | null;
+  /** indices of partial takes already executed. */
+  partialTakesHit: number[];
+  /** laddered exit config (scale-out tranches). */
+  ladderExits: LadderExit[];
+}
+
+export interface LadderExit {
+  /** Price level (TON per token) to exit this tranche. */
+  priceTon: number;
+  /** Fraction of remaining position to exit (0-1). */
+  sizePct: number;
+  /** Label for logging. */
+  label: string;
+  /** Whether this tranche has been executed. */
+  executed: boolean;
 }
 
 export interface OpenPositionInput {
@@ -46,21 +80,48 @@ export interface OpenPositionInput {
   mode: ExitMode;
   feesTon: number;
   timeStopMs: number | null;
+  /** ATR at entry for Chandelier trailing. */
+  atrAtEntry: number;
+  /** Swing low/high for structure-based SL. */
+  swingLow: number | null;
+  swingHigh: number | null;
+  /** Laddered exit tranches. */
+  ladderExits: LadderExit[];
 }
 
 export function openPosition(input: OpenPositionInput): Position {
   if (input.entryTon <= 0 || input.amountTon <= 0) throw new Error("openPosition: entryTon and amountTon must be positive");
+  const qty = input.amountTon / input.entryTon;
   return {
     id: newId("pos"),
     ...input,
-    qty: input.amountTon / input.entryTon,
+    qty,
+    initialStopLossTon: input.stopLossTon,
+    remainingQty: qty,
     highWaterTon: input.entryTon,
+    lowWaterTon: input.entryTon,
     trailingStopTon: null,
     breakEvenAtTon: null,
+    trendFlipPrice: null,
+    trendState: "unknown",
+    partialTakesHit: [],
+    ladderExits: input.ladderExits.map(le => ({ ...le, executed: false })),
   };
 }
 
 /** Break-even activation = +2× fee, matching ton-tpsl-manager's rule. */
 export function breakEvenActivatePct(feesTon: number, amountTon: number): number {
   return amountTon > 0 ? (2 * feesTon) / amountTon : 0.02;
+}
+
+/** Chandelier Exit: trailing stop = highWater - (atrMultiplier * ATR) */
+export function chandelierStop(highWater: number, atr: number, multiplier: number): number {
+  return highWater - (multiplier * atr);
+}
+
+/** Supertrend flip: close when price crosses the trend line */
+export function supertrendFlip(price: number, trendLine: number, trendState: TrendState): boolean {
+  if (trendState === "uptrend") return price <= trendLine;
+  if (trendState === "downtrend") return price >= trendLine;
+  return false;
 }

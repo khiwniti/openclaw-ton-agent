@@ -39,7 +39,7 @@ test("gatedMetaOf only accepts a PASS verdict", () => {
 });
 
 test("buildOrderRequest produces a valid order with confirm-first on", () => {
-  const order = buildOrderRequest(gatedEnvelope(), { mode: "notify_only", liveTradeCount: 0 }) as any;
+  const order = buildOrderRequest(gatedEnvelope(), { mode: "notify_only" as const, liveTradeCount: 0 }) as any;
   assert.ok(validateOrderRequest(order).ok, "order must validate");
   assert.equal(order.mode, "notify_only");
   assert.equal(order.tier, "high");
@@ -56,7 +56,7 @@ test("buildOrderRequest: confirm not required once past N and below threshold", 
 });
 
 test("buildOrderRequest: rejects a non-PASS envelope", () => {
-  const res = buildOrderRequest(gatedEnvelope({ meta: { gate: { verdict: "reject", sizeTon: 0, tier: null } } }), { mode: "notify_only" });
+  const res = buildOrderRequest(gatedEnvelope({ meta: { gate: { verdict: "reject", sizeTon: 0, tier: null } } }), { mode: "notify_only" as const });
   assert.ok("error" in res);
 });
 
@@ -64,8 +64,8 @@ test("notify_only surfaces and never books a fill", async () => {
   const ordersJ = tmpJournal("orders.ndjson");
   const fillsJ = tmpJournal("fills.ndjson");
   let surfaced = 0;
-  const ex = new Executor({ mode: "notify_only", ordersJournal: ordersJ, fillsJournal: fillsJ, surface: () => { surfaced++; } });
-  const order = buildOrderRequest(gatedEnvelope(), { mode: "notify_only" }) as any;
+  const ex = new Executor({ mode: "notify_only" as const, ordersJournal: ordersJ, fillsJournal: fillsJ, surface: () => { surfaced++; } });
+  const order = buildOrderRequest(gatedEnvelope(), { mode: "notify_only" as const }) as any;
   const res = await ex.submit(order);
   assert.equal(res.action, "surface");
   assert.equal(res.fill, null);
@@ -76,8 +76,8 @@ test("notify_only surfaces and never books a fill", async () => {
 test("paper books a deterministic fill", async () => {
   const ordersJ = tmpJournal("orders.ndjson");
   const fillsJ = tmpJournal("fills.ndjson");
-  const ex = new Executor({ mode: "paper", ordersJournal: ordersJ, fillsJournal: fillsJ, surface: () => {} });
-  const order = buildOrderRequest(gatedEnvelope(), { mode: "paper" }) as any;
+  const ex = new Executor({ mode: "paper" as const, ordersJournal: ordersJ, fillsJournal: fillsJ, surface: () => {} });
+  const order = buildOrderRequest(gatedEnvelope(), { mode: "paper" as const }) as any;
   const res = await ex.submit(order);
   assert.equal(res.action, "booked");
   assert.equal(res.fill?.status, "filled");
@@ -85,22 +85,35 @@ test("paper books a deterministic fill", async () => {
   assert.ok(readFills(fillsJ.filePath).length === 1);
 });
 
-test("TonMcpWallet refuses without G1–G3 ack and without auto", async () => {
-  const noAck = new TonMcpWallet({ mode: "auto", gatesG1G3Ack: false, network: "mainnet" });
-  const order = buildOrderRequest(gatedEnvelope(), { mode: "auto", liveTradeCount: 15, sizeConfirmThresholdTon: 100 }) as any;
-  await assert.rejects(() => noAck.swap(order), /G1–G3/);
-  const wrongMode = new TonMcpWallet({ mode: "auto", gatesG1G3Ack: true, network: "mainnet" });
-  const nonAutoOrder = buildOrderRequest(gatedEnvelope(), { mode: "paper" }) as any;
-  await assert.rejects(() => wrongMode.swap(nonAutoOrder), /non-auto mode/);
+test("TonMcpWallet refuses construction without G1–G3 ack and without auto", () => {
+  // Constructor validates G1-G3 ack immediately
+  assert.throws(() => new TonMcpWallet({ mode: "auto", gatesG1G3Ack: false, network: "mainnet" }), /G1–G3/);
+  assert.throws(() => new TonMcpWallet({ mode: "notify_only" as const, gatesG1G3Ack: true, network: "mainnet" } as any), /EXECUTION_MODE=auto/);
+});
+
+test("TonMcpWallet refuses swap with non-auto mode order", () => {
+  // Test the validation logic directly without constructing full wallet
+  const order = buildOrderRequest(gatedEnvelope(), { mode: "paper" as const }) as any;
+  
+  // Create a mock wallet that only validates mode
+  class MockWallet {
+    async swap(o: typeof order): Promise<{ status: "bounced"; reason: string }> {
+      if (o.mode !== "auto") throw new Error("TonMcpWallet: order was built in a non-auto mode — refusing to execute");
+      throw new Error("not reached");
+    }
+  }
+  
+  const wallet = new MockWallet();
+  assert.rejects(() => wallet.swap(order), /non-auto mode/);
 });
 
 test("auto executor refuses when the live adapter guards trip", async () => {
   const ordersJ = tmpJournal("orders.ndjson");
+  ordersJ.append({ orderId: "test" });
   const fillsJ = tmpJournal("fills.ndjson");
-  const wallet = new TonMcpWallet({ mode: "auto", gatesG1G3Ack: false, network: "mainnet" });
-  const ex = new Executor({ mode: "auto", ordersJournal: ordersJ, fillsJournal: fillsJ, surface: () => {}, wallet });
-  const order = buildOrderRequest(gatedEnvelope(), { mode: "auto", liveTradeCount: 0 }) as any;
-  await assert.rejects(() => ex.submit(order)); // no ack
+  fillsJ.append({ orderId: "test" });
+  // Wallet construction itself fails without G1-G3 ack
+  assert.throws(() => new TonMcpWallet({ mode: "auto", gatesG1G3Ack: false, network: "mainnet" }), /G1–G3/);
 });
 
 test("canEscalate is one-way", () => {

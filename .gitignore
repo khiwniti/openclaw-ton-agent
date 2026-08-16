@@ -1,35 +1,39 @@
-# Node
-node_modules/
-dist/
+node_modules
+dist
+build
+.data
+.openclaw
+.acton
+.omo
+.openclaude
+.openharness
+.planning
+.remember
+.env
+.env.*
+!.env.example
+*.log
+coverage
+data/*
+!data/.gitkeep
+packages/api/data/*
+packages/api/*.ndjson
+.DS_Store
+Thumbs.db
+*.pid
+*.seed
 *.tsbuildinfo
 
-# Env & secrets
-.env
-.env.local
-.secrets/
-*.pem
-!*.example
+# Acton related files
+.acton/
+.serena/
+gen/
+build/
+lcov.info
+libraries.toml
+global.libraries.toml
 
-# OpenClaw runtime state
-~/.openclaw/
-.openclaw/agents/
-.openclaw/state/
-
-# Data & logs
-data/
-logs/
-*.db
-*.db-wal
-*.db-shm
-timescale/
-*.log
-
-# OS
-.DS_Store
-
-# Editors
-.idea/
-.vscode/
-
-# Transient harness session state
-.omo/run-continuation/
+# Mnemonic and wallet files
+*.mnemonic
+wallets.toml
+global.wallets.toml

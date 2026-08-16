@@ -158,7 +158,7 @@ test("gates: a position too small to cover the fee floor rejects", () => {
 
 test("gates: correlation rejects when an open position shares the group", () => {
   const r = evaluateGates(env(), ctx({
-    openPositions: [{ address: "EQA-other", group: "g1", pnlPct: 5 }],
+    openPositions: [{ address: "EQA-other", group: "g1", pnlPct: 5, sizeTon: 10, sector: undefined }],
     correlationGroup: (addr) => (addr === "EQA-gated-1" ? "g1" : null),
   }));
   assert.equal(r.verdict, "reject");
@@ -174,7 +174,7 @@ test("gates: expected-value is position-level and positive when the game is +EV"
 });
 
 test("gates: risk-off halts the feed and leaves open positions untouched", () => {
-  const positions = [{ address: "EQA-open-1", group: "g1", pnlPct: 5 }];
+  const positions = [{ address: "EQA-open-1", group: "g1", pnlPct: 5, sizeTon: 10, sector: undefined }];
   const r = evaluateGates(env(), ctx({ macroRiskOff: true, openPositions: positions }));
   assert.equal(r.verdict, "halt");
   assert.match(r.reasons[0], /risk-off/);

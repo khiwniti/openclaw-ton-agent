@@ -69,7 +69,7 @@ export async function runScanTick(opts: PipelineOpts): Promise<ScanTickResult> {
       poolAvailable: !!view.poolAddress,
     });
 
-    const envelope: SignalEnvelope = {
+    const envelope = {
       id: newId("sig"),
       ts: Date.now(),
       source: isFixture(view.master) ? "audit" : "radar",
@@ -78,11 +78,10 @@ export async function runScanTick(opts: PipelineOpts): Promise<ScanTickResult> {
         name: view.name,
         ticker: view.symbol,
         decimals: view.decimals,
-        priceTon: view.priceTon,
-        curvePct: view.curvePct,
-        liquidityTon: view.liquidityTon,
+        priceTon: hasQuote ? (view.priceTon ?? null) : null,
+        curvePct: view.curvePct ?? null,
+        liquidityTon: hasQuote ? (view.liquidityTon ?? null) : null,
         holders: audit.holders ?? undefined,
-        tags: isFixture(view.master) ? [...new Set(["fixture", ...audit.flags])] : audit.flags,
       },
       audit: { verified: audit.verified, renounced: audit.renounced, locked: audit.locked, honeypot: audit.honeypot },
       score: { soft: score.soft, risk: score.risk },
@@ -91,14 +90,15 @@ export async function runScanTick(opts: PipelineOpts): Promise<ScanTickResult> {
         poolAddress: view.poolAddress,
         scoreBreakdown: { audit: score.auditDeduction, holders: score.holdersDeduction, age: score.ageDeduction, liquidity: score.liquidityDeduction, gap: score.dataGapDeduction },
       },
-    };
+    } as const;
 
-    const parsed = validateEnvelope(envelope);
-    if (!parsed.ok) {
-      journal.append({ ts: Date.now(), kind: "scan.drop", master: view.master, reason: parsed.reason });
+    const envelopeParsed = validateEnvelope(envelope);
+    if (!envelopeParsed.ok) {
+      journal.append({ ts: Date.now(), kind: "scan.drop", master: view.master, reason: envelopeParsed.reason });
       result.dropped++;
       continue;
     }
+    const parsed = envelopeParsed.value;
 
     const status = hasQuote ? "validated" : "incomplete";
     if (!hasQuote) result.incomplete++;
@@ -106,7 +106,7 @@ export async function runScanTick(opts: PipelineOpts): Promise<ScanTickResult> {
     if (!hasQuote) flags.push("quote_unavailable");
 
     const ingested: IngestedEnvelope = {
-      ...parsed.value,
+      ...parsed,
       status,
       flags,
       reasoning: `audit.verified=${audit.verified} renounced=${audit.renounced} soft=${score.soft} risk=${score.risk}`,
@@ -119,11 +119,12 @@ export async function runScanTick(opts: PipelineOpts): Promise<ScanTickResult> {
       continue;
     }
 
-    journal.append(ingested);
-    const emitted = await emit(parsed.value);
+    const emitted = await emit(parsed);
     if (emitted && typeof emitted === "object" && "sent" in emitted) {
       (ingested.meta ??= {})["signalOut"] = emitted;
     }
+
+    journal.append(ingested);
     result.envelopes.push(ingested);
     result.emitted++;
   }

@@ -2,8 +2,8 @@
  * Deterministic risk gates (L3). Verdicts OUTRANK any LLM call (architecture
  * §10). Evaluated in order; the first hard failure halts with a reason.
  *
- *   kill switch → drawdown → cooldown → correlation → trade floor →
- *   quote/entry → R:R floor → fee coverage → win probability → Kelly size.
+ *   kill switch → drawdown → cooldown → correlation → portfolio limits →
+ *   trade floor → quote/entry → R:R floor → fee coverage → win probability → Kelly size.
  */
 import { GATE_CONFIG } from "./config";
 import { sizedPositionTon } from "./kelly";
@@ -12,12 +12,30 @@ import type { IngestedEnvelope } from "@openclaw-ton-agent/shared";
 
 export type GateVerdict = "pass" | "reject" | "halt";
 
+export interface SectorConfig {
+  /** Maximum % of bankroll allocated to this sector. */
+  maxExposurePct: number;
+  /** Token addresses belonging to this sector. */
+  tokens: string[];
+}
+
+export interface PortfolioRiskConfig {
+  /** Maximum concurrent open positions. */
+  maxConcurrentPositions: number;
+  /** Maximum % of bankroll in any single sector. */
+  maxSectorExposurePct: number;
+  /** Sector definitions for exposure tracking. */
+  sectors: Record<string, SectorConfig>;
+  /** Maximum % of bankroll in correlated positions (same group). */
+  maxCorrelatedExposurePct: number;
+}
+
 export interface GateContext {
   now: number;
   /** token address → cooldown-until (ms). Mutable so a runner persists it. */
   cooldowns: Map<string, number>;
   /** open positions for correlation + drawdown evaluation. */
-  openPositions: Array<{ address: string; group?: string; pnlPct: number | null }>;
+  openPositions: Array<{ address: string; group?: string; pnlPct: number | null; sizeTon: number; sector?: string }>;
   /** current rolling drawdown in % (0-100). */
   drawdownPct: number;
   killSwitchFlipped: boolean;
@@ -32,6 +50,8 @@ export interface GateContext {
   volPct?: number;
   /** group resolver for correlation (address → group id). */
   correlationGroup?: (address: string) => string | null;
+  /** Portfolio-level risk limits. */
+  portfolioRisk?: PortfolioRiskConfig;
 }
 
 export interface GateResult {
@@ -84,6 +104,62 @@ export function evaluateGates(envelope: IngestedEnvelope, ctx: GateContext): Gat
     }
   }
 
+  // Portfolio-level risk checks
+  if (ctx.portfolioRisk) {
+    const pr = ctx.portfolioRisk;
+
+    // Max concurrent positions
+    if (ctx.openPositions.length >= pr.maxConcurrentPositions) {
+      reasons.push(`max concurrent positions ${pr.maxConcurrentPositions} reached`);
+      return base;
+    }
+
+    // Correlated exposure limit
+    if (group && pr.maxCorrelatedExposurePct > 0) {
+      const correlatedExposure = ctx.openPositions
+        .filter((p) => (p.group ?? null) === group)
+        .reduce((sum, p) => sum + p.sizeTon, 0);
+      const correlatedPct = (correlatedExposure / ctx.bankrollTon) * 100;
+      if (correlatedPct > pr.maxCorrelatedExposurePct) {
+        reasons.push(`correlated exposure ${correlatedPct.toFixed(1)}% > limit ${pr.maxCorrelatedExposurePct}%`);
+        return base;
+      }
+    }
+
+    // Sector exposure limit
+    const sector = ctx.openPositions.find((p) => p.address === address)?.sector;
+    if (sector && pr.sectors[sector]) {
+      const sectorExposure = ctx.openPositions
+        .filter((p) => p.sector === sector)
+        .reduce((sum, p) => sum + p.sizeTon, 0);
+      const sectorPct = (sectorExposure / ctx.bankrollTon) * 100;
+      const sectorLimit = pr.sectors[sector].maxExposurePct;
+      if (sectorPct > sectorLimit) {
+        reasons.push(`sector ${sector} exposure ${sectorPct.toFixed(1)}% > limit ${sectorLimit}%`);
+        return base;
+      }
+    }
+
+    // Also check the candidate's own sector (if it would exceed limit)
+    const candidateSector = envelope.meta?.sector as string | undefined;
+    if (candidateSector && pr.sectors[candidateSector]) {
+      const sectorExposure = ctx.openPositions
+        .filter((p) => p.sector === candidateSector)
+        .reduce((sum, p) => sum + p.sizeTon, 0);
+      // Add the proposed position size to check after sizing below
+      const candidateSectorExposure = sectorExposure;
+      const candidateSectorLimit = pr.sectors[candidateSector].maxExposurePct;
+      const candidateSectorCheck = {
+        sectorExposure: candidateSectorExposure,
+        sectorLimit: candidateSectorLimit,
+      };
+      if (candidateSectorCheck.sectorLimit !== undefined && candidateSectorCheck.sectorExposure / ctx.bankrollTon * 100 > candidateSectorCheck.sectorLimit) {
+        reasons.push(`sector ${candidateSector} exposure ${(candidateSectorCheck.sectorExposure / ctx.bankrollTon * 100).toFixed(1)}% would exceed limit ${candidateSectorCheck.sectorLimit}%`);
+        return base;
+      }
+    }
+  }
+
   const soft = envelope.score?.soft ?? 0;
   const tier = tierForScore(soft);
   if (!tier) {
@@ -91,13 +167,13 @@ export function evaluateGates(envelope: IngestedEnvelope, ctx: GateContext): Gat
     return base;
   }
 
-  const entryTon = envelope.token.priceTon;
-  if (entryTon === null || entryTon <= 0) {
+  const entryTon = envelope.token.priceTon ?? null;
+  if (!entryTon || entryTon <= 0) {
     reasons.push("no quote (priceTon null) — cannot size");
     return base;
   }
 
-  const setup = pointSetup({ entryTon, curvePct: envelope.token.curvePct, volPct: ctx.volPct });
+  const setup = pointSetup({ entryTon, curvePct: envelope.token.curvePct ?? 50, volPct: ctx.volPct });
   if (setup.rr < GATE_CONFIG.minRr) {
     reasons.push(`R:R ${setup.rr.toFixed(2)} < floor ${GATE_CONFIG.minRr}`);
     return base;

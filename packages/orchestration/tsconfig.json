@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@openclaw-ton-agent/shared": ["../shared/src/index.ts"],
+      "@openclaw-ton-agent/core": ["../core/src/index.ts"],
+      "@openclaw-ton-agent/wallet": ["../wallet/src/index.ts"],
+      "@openclaw-ton-agent/dex": ["../dex/src/index.ts"],
+      "@openclaw-ton-agent/security": ["../security/src/index.ts"],
+      "@openclaw-ton-agent/storage": ["../storage/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

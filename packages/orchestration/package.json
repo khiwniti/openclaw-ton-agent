@@ -1,0 +1,32 @@
+{
+  "name": "@openclaw-ton-agent/orchestration",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "tsx --test src/__tests__/**/*.test.ts",
+    "test:watch": "tsx --test --watch src/__tests__/**/*.test.ts"
+  },
+  "dependencies": {
+    "@openclaw-ton-agent/shared": "*",
+    "@openclaw-ton-agent/core": "*",
+    "@openclaw-ton-agent/wallet": "*",
+    "@openclaw-ton-agent/dex": "*",
+    "@openclaw-ton-agent/security": "*",
+    "@openclaw-ton-agent/storage": "*",
+    "@ton/ton": "^15.1.0",
+    "@ton/crypto": "^3.3.0",
+    "zod": "^3.23.8",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

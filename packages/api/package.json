@@ -1,0 +1,30 @@
+{
+  "name": "@openclaw-ton-agent/api",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "tsx --test src/__tests__/**/*.test.ts",
+    "test:watch": "tsx --test --watch src/__tests__/**/*.test.ts"
+  },
+  "dependencies": {
+    "@openclaw-ton-agent/shared": "*",
+    "@openclaw-ton-agent/storage": "*",
+    "@fastify/websocket": "^11.3.0",
+    "@fastify/cors": "^11.3.0",
+    "@fastify/helmet": "^13.1.0",
+    "@fastify/rate-limit": "^11.2.0",
+    "fastify": "^5.2.1",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

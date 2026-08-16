@@ -36,9 +36,12 @@ export async function runGatedFeed(opts: { input: string; output: string }) {
 
   for (const row of rows) {
     const parsed = validateIngested(row);
-    if (!parsed.ok) continue;
+    if (!parsed.ok || !parsed.value) {
+      continue;
+    }
     valid++;
-    const env = parsed.value;
+    const env = parsed.value!!;
+    if (!env) continue;
 
     // Macro risk-off polling (throttled by macroPollIntervalMs)
     let macroRiskOff = false;

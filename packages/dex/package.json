@@ -1,0 +1,22 @@
+{
+  "name": "@openclaw-ton-agent/dex",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "main": "src/router.ts",
+  "types": "src/router.ts",
+  "type": "module",
+  "scripts": {
+    "test": "tsx --test 'src/**/*.test.ts'"
+  },
+  "dependencies": {
+    "@ton/ton": "^15.1.0",
+    "@ton/crypto": "^3.3.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

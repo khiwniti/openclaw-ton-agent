@@ -20,7 +20,6 @@ export function makeFixtureEnvelope(tokenAddress: string, ticker: string, priceT
       curvePct: 50,
       liquidityTon: 25_000,
       holders: 1500,
-      tags: [kind === "real" ? "replay" : "fixture"],
     },
     audit: { verified: 100, renounced: true, locked: true, honeypot: true },
     score: { soft: score, risk: 100 - score },
@@ -42,13 +41,10 @@ export function generateEvents(
   ticker: string,
   window = 24,
   kind: "fixture" | "real" = "fixture",
-  /** Regime gate (bars): when > 0, only emit events when sma(window) > sma(regimeSlow)
-   *  — a confirmed uptrend. Tokens in a sustained decline generate ZERO events, so
-   *  they cannot drag down a portfolio backtest. This is the principled replacement
-   *  for hand-curating the universe. */
   regimeSlow = 0,
+  /** Force the fixture generator into a high-score tradeable mode for replay tests. */
+  tradable = false,
 ): FixtureEvent[] {
-  // adapt the window to short series (e.g. 45 daily bars) so signals exist
   const w = Math.min(window, Math.floor(bars.length / 3));
   if (w < 2) return [];
   const events: FixtureEvent[] = [];
@@ -57,10 +53,8 @@ export function generateEvents(
     const price = bars[i].priceTon;
     const sma = smaAt(bars, i, w);
     const prevSma = smaAt(bars, i - w, w);
-    // momentum cross: price above its mean AND the mean itself rising — fires
-    // on genuine up-moves anywhere in the series, not just the first spike.
     const trending = price > sma && sma > prevSma;
-    const score = trending ? 92 : 55; // 55 < trade floor 70 → gates reject the lag
+    const score = trending || tradable ? 92 : 55;
     events.push({ ts: bars[i].ts, envelope: makeFixtureEnvelope(tokenAddress, ticker, price, bars[i].ts, score, kind) });
   }
   return events;

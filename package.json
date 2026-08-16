@@ -15,14 +15,23 @@
     "backtest:replay": "npm --workspace packages/backtest run replay",
     "backtest:hyperopt": "npm --workspace packages/backtest run hyperopt",
     "gateway:config": "node scripts/validate-openclaw-config.mjs",
+    "api:dev": "npm --workspace packages/api run dev",
+    "api:start": "npm --workspace packages/api run start",
+    "agents:dev": "npm --workspace packages/agents run dev",
+    "agents:start": "npm --workspace packages/agents run start",
+    "orchestration:dev": "npm --workspace packages/orchestration run dev",
     "test": "npm test --workspaces --if-present",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dev": "concurrently \"npm run scanner:dev\" \"npm run api:dev\" \"npm run agents:dev\" \"npm run orchestration:dev\"",
+    "start": "npm run start:services",
+    "start:services": "npm run scanner:start & npm run api:start & npm run agents:start & npm run orchestration:start & wait"
   },
   "engines": {
     "node": ">=22.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "concurrently": "^9.1.0",
     "json5": "^2.2.3",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"

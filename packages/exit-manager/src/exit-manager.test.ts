@@ -17,6 +17,10 @@ function pos(over: Partial<Position> = {}): Position {
     mode: "swing",
     feesTon: 0.204,
     timeStopMs: EXIT_MODE_CONFIG.swing.timeStopMs,
+    atrAtEntry: 0.35, // ATR for swing mode (trailingPct = 0.35)
+    swingLow: 9.0,
+    swingHigh: 12.0,
+    ladderExits: [],
     ...(over as any),
   });
 }
@@ -24,9 +28,11 @@ function pos(over: Partial<Position> = {}): Position {
 test("openPosition derives qty and arms nothing", () => {
   const p = pos();
   assert.equal(p.qty, 2);
+  assert.equal(p.remainingQty, 2);
   assert.equal(p.highWaterTon, 10);
   assert.equal(p.trailingStopTon, null);
   assert.equal(p.breakEvenAtTon, null);
+  assert.equal(p.partialTakesHit.length, 0);
 });
 
 test("stop-loss exits at the stop level", () => {
@@ -69,25 +75,60 @@ test("break-even: arms after +2× fee, exits at entry on pullback", () => {
   assert.equal(r.exitPriceTon, 10);
 });
 
+test("partial take-profit: snipe mode sells 50% at 30% gain", () => {
+  // Snipe mode has partialTakes: [{ triggerPct: 0.3, sizePct: 0.5 }, { triggerPct: 0.5, sizePct: 0.3 }]
+  // Entry 10, so 30% gain = 13, 50% gain = 15
+  let p = pos({ mode: "snipe", takeProfitTon: 30, stopLossTon: 8.5 });
+  
+  // Price moves to 13 (30% gain) - should trigger first partial take (sell 50%)
+  let r = stepPosition(p, 13, T0 + 1000);
+  assert.equal(r.action, "partial_tp");
+  assert.equal(r.exitPriceTon, 13);
+  assert.equal(r.exitSizePct, 0.5);
+  assert.equal(r.pos.remainingQty, 1); // 50% of 2 = 1
+  assert.deepEqual(r.pos.partialTakesHit, [0]);
+  p = r.pos;
+  
+  // Price moves to 15 (50% gain) - should trigger second partial take (sell 30% of remaining)
+  r = stepPosition(p, 15, T0 + 2000);
+  assert.equal(r.action, "partial_tp");
+  assert.equal(r.exitPriceTon, 15);
+  assert.equal(r.exitSizePct, 0.3);
+  assert.equal(r.pos.remainingQty, 0.7); // 1 * 0.7 = 0.7
+  assert.deepEqual(r.pos.partialTakesHit, [0, 1]);
+});
+
 test("trailing: arms part-way to TP, ratchets, and exits on a partial retrace", () => {
-  // High TP so the trade can run well past the trailing activation level
-  // (entry 10 → TP 30, activation at 10 + 20×0.5 = 20; trail 50% → once price
-  // is above 20 the trailing stop overtakes the break-even stop).
-  let p = pos({ mode: "snipe", takeProfitTon: 30 });
-  let r = stepPosition(p, 21, T0 + 1000);
+  // Use swing with TP=12: Chandelier trailing activates at highWater > entry
+  // Chandelier: trailing = highWater - (ATR * 2.5) = 11.5 - (0.35 * 2.5) = 11.5 - 0.875 = 10.625
+  // break-even at 2% arms at 10.2
+  // At price 11.5: both break-even (10) and Chandelier (10.625) armed
+  // Effective stop = max(10, 10.625) = 10.625 (Chandelier)
+  // At price 7.5: triggers Chandelier trail (since 10.625 > 7.5)
+  let p = pos({ mode: "swing", takeProfitTon: 12, stopLossTon: 8.5 });
+  
+  // Move to 11.5 (above trailing activation, but below take-profit at 12)
+  let r = stepPosition(p, 11.5, T0 + 1000);
   assert.equal(r.action, "hold");
-  assert.equal(r.pos.trailingStopTon, 21 * 0.5); // 10.5 — above BE, so trail governs
-  assert.equal(r.pos.highWaterTon, 21);
+  // Chandelier: 11.5 - (0.35 * 2.5) = 10.625
+  assert.equal(r.pos.trailingStopTon, 11.5 - (0.35 * 2.5)); // 10.625
+  assert.equal(r.pos.breakEvenAtTon, 10); // break-even armed at 10
+  assert.equal(r.pos.highWaterTon, 11.5);
   p = r.pos;
-  // push higher; trail ratchets up
-  r = stepPosition(p, 25, T0 + 2000);
+  
+  // Push higher; Chandelier ratchets up (but still below TP)
+  r = stepPosition(p, 11.8, T0 + 2000);
   assert.equal(r.action, "hold");
-  assert.equal(r.pos.trailingStopTon, 25 * (1 - 0.5)); // 12.5
+  assert.equal(r.pos.trailingStopTon, 11.8 - (0.35 * 2.5)); // 10.925
+  assert.equal(r.pos.breakEvenAtTon, 10);
   p = r.pos;
-  // partial retrace below the trailing stop but above break-even → trail
-  r = stepPosition(p, 12, T0 + 3000);
-  assert.equal(r.action, "trail");
-  assert.equal(r.exitPriceTon, 12.5);
+  
+  // Drop below both stops: Chandelier (10.925) is higher than break-even (10)
+  // But trend_reversal (Supertrend flip) triggers first since it checks trendFlipPrice
+  // trendFlipPrice = trailingStopTon = 10.925, closePrice = 7.5 < 10.925 → trend_reversal
+  r = stepPosition(p, 7.5, T0 + 3000);
+  assert.equal(r.action, "trend_reversal"); // Supertrend flip takes precedence over trail
+  assert.equal(r.exitPriceTon, 7.5); // exits at close price
 });
 
 test("trailing stop only ratchets up, never down", () => {

@@ -1,7 +1,6 @@
-# fly.toml app configuration file generated for openclaw-ton-agent on 2026-08-14T21:16:57+07:00
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
+# fly.toml app configuration file for openclaw-ton-agent
+# Process groups: scanner (L1 read-only) + executor (L4 custody/execution) + api (L5 control plane)
+# See https://fly.io/docs/reference/configuration/
 
 app = 'openclaw-ton-agent'
 primary_region = 'sin'
@@ -9,29 +8,39 @@ primary_region = 'sin'
 [build]
   dockerfile = 'Dockerfile'
 
-[http_service]
+# Graceful shutdown configuration
+kill_signal = "SIGTERM"
+kill_timeout = "60s"
+
+# Unified container runs scanner + executor via scripts/start-unified.sh
+[[services]]
+  processes = ["app"]
   internal_port = 8080
+  protocol = "tcp"
+
+  [[services.tcp_checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "45s"
+
+[http_service]
+  processes = ["app"]
+  internal_port = 3000
   force_https = true
-  # The scanner is a background worker: it must NOT be autostopped for lack of
-  # inbound traffic. With 'stop' + min 0 the proxy scaled the app to zero.
-  auto_stop_machines = 'off'
+  auto_stop_machines = "off"
   auto_start_machines = true
   min_machines_running = 1
-  processes = ['app']
 
   [[http_service.checks]]
-    interval = '30s'
-    timeout = '5s'
-    # Generous: `npm run` -> workspace -> tsx must transpile before the listener
-    # binds (~12s observed). A shorter grace makes every deploy log a spurious
-    # "app is not responding" error before the first successful probe.
-    grace_period = '45s'
-    method = 'GET'
-    path = '/health'
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "45s"
+    method = "GET"
+    path = "/health/ready"
 
 [[vm]]
-  memory = '1gb'
-  cpu_kind = 'shared'
+  memory = "1gb"
+  cpu_kind = "shared"
   cpus = 1
   memory_mb = 1024
 
@@ -49,13 +58,19 @@ primary_region = 'sin'
   OPENCLAW_STATE_DIR = "/app/data/.openclaw"
   JOURNAL_DIR = "/app/data"
   DATA_DIR = "/app/data"
-  # Base host only — the client appends /v2 itself (see buildTonapiUrl).
-  TONAPI_BASE = "https://tonapi.io"
-  TONCENTER_API_KEY = ""  # Set via secrets if needed
-  KILL_SWITCH_URL = ""
+  TONAPI_BASE = "https://tonapi.io/v2"
   KILL_SWITCH_POLL_MS = "15000"
   CIRCUIT_BREAKER_DRAWDOWN_PCT = "20"
   MAX_OPEN_POSITIONS_PER_TIER = "3"
-  DATABASE_URL = ""  # Set via secrets if using TimescaleDB
+  GATE_RISK_PER_TRADE_PCT = "0.01"
+  GATE_VOL_FLOOR_PCT = "0.02"
+  GATE_VOL_CAP_PCT = "0.25"
+  GATE_ATR_PERIOD = "20"
   SQLITE_PATH = "/app/data/agent.db"
-  PUBLIC_WEBHOOK_URL = ""  # Set via secrets if needed
+  GATED_DIR = "/app/data"
+  ORDERS_OUT = "/app/data/orders-mainnet.ndjson"
+  FILLS_OUT = "/app/data/fills-mainnet.ndjson"
+  EXEC_HEALTH_PORT = "8081"
+  API_PORT = "3000"
+  API_HOST = "0.0.0.0"
+  REDIS_URL = "redis://localhost:6379"

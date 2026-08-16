@@ -49,4 +49,15 @@ export const EXEC_CONFIG = {
     tonConfigPath: str("TON_CONFIG_PATH", "~/.config/ton/config.json"),
     rpcUrl: str("TON_RPC_URL", "https://toncenter.com/api/v2/jsonRPC"),
   },
+
+  /** Acton integration toggles. */
+  acton: {
+    /** When true, auto mode uses ActonWallet instead of TonMcpWallet. */
+    enabled: bool("ACTON_ENABLED", false),
+    /** Acton project root for CLI/FFI calls. */
+    projectPath: str("ACTON_PROJECT_PATH", "."),
+    /** Optional deployed contract/router address overrides. */
+    contractAddress: str("ACTON_CONTRACT_ADDRESS", ""),
+    routerAddress: str("ACTON_ROUTER_ADDRESS", ""),
+  },
 };

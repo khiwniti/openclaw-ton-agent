@@ -37,10 +37,11 @@ export function buildOrderRequest(envelope: IngestedEnvelope, opts: BuildOrderOp
   const gated = gatedMetaOf(envelope);
   if (!gated) return { error: `envelope ${envelope.id} is not a gated PASS (no usable meta.gate)` };
 
-  const priceTon = envelope.token.priceTon;
-  if (priceTon === null || priceTon <= 0) return { error: `envelope ${envelope.id} has no usable quote` };
+  const priceTon = envelope.token.priceTon ?? null;
+  if (!priceTon || priceTon <= 0) return { error: `envelope ${envelope.id} has no usable quote` };
 
-  const setup = pointSetup({ entryTon: priceTon, curvePct: envelope.token.curvePct });
+  const curvePct = envelope.token.curvePct ?? 50;
+  const setup = pointSetup({ entryTon: priceTon, curvePct, volPct: GATE_CONFIG.volPct });
   const slippageBps = opts.slippageBps ?? GATE_CONFIG.spreadBpsAllowance;
   const now = opts.now ?? Date.now();
   const orderTtlMs = opts.orderTtlMs ?? 60_000;

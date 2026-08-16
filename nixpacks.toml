@@ -1,0 +1,13 @@
+version = "1"
+
+[phases.setup]
+nixPkgs = ["nodejs", "npm"]
+
+[phases.install]
+cmds = ["npm ci --ignore-scripts"]
+
+[phases.build]
+cmds = ["npm run typecheck"]
+
+[start]
+cmd = "npm run start"

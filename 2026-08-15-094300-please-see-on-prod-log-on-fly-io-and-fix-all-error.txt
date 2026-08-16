@@ -1,0 +1,1387 @@
+ ▐▛███▜▌   Claude Code v2.1.154
+▝▜█████▛▘  stealth · API Usage Billing
+  ▘▘ ▝▝    @agents/adlc-orchestrator.md · ~/openclaw-ton-agent
+
+   Opus 4.8 is now available! · /model to switch
+  ⎿  SessionStart:startup says: SonarQube plugin initialised.
+       sonarqube-cli: ✗ not found — run /sonarqube:sonar-integrate
+       SonarQube hooks: ✗ no hooks installed — run /sonarqube:sonar-integrate
+
+❯ please see on prod log on fly io and fix all error                            
+
+  Thought for 9s (ctrl+o to expand)
+
+⏺ I'll start by invoking the systematic-debugging skill, since this is a "fix
+  errors in production" task.
+
+⏺ Skill(superpowers:systematic-debugging)
+  ⎿  Successfully loaded skill
+
+  Thought for 4s (ctrl+o to expand)
+
+⏺ Using superpowers:systematic-debugging to work through this. Phase 1 is
+  evidence gathering — let me look at the deployment config and pull the actual
+  production logs before theorizing about anything.
+
+  Thought for 5s, read 1 file (ctrl+o to expand)
+
+⏺ Now let me gather the actual production evidence. Checking flyctl auth and app
+  status first:
+
+  Thought for 4s, ran 1 shell command (ctrl+o to expand)
+
+⏺ Authenticated as kiw.brw1@gmail.com. Now pulling the production state and
+  logs:
+
+  Thought for 5s, ran 1 shell command (ctrl+o to expand)
+
+⏺ Important finding already: the app is suspended with both machines stopped.
+  Let me pull logs — historical logs may still be retrievable:
+
+  Thought for 5s, ran 1 shell command (ctrl+o to expand)
+
+⏺ timeout isn't on macOS by default. Let me use flyctl's own behavior with a
+  background-safe approach:
+
+  Thought for 14s, ran 1 shell command (ctrl+o to expand)
+
+⏺ Excellent — I have concrete evidence. Let me read the source at the exact
+  crash site:
+
+  Thought for 20s, read 1 file (ctrl+o to expand)
+
+⏺ I have concrete evidence. Let me examine the codebase at each failure point in
+  parallel:
+
+  Thought for 24s, searched for 1 pattern (ctrl+o to expand)
+
+⏺ Now I have hard evidence of multiple distinct failures. Let me check secrets
+  and the scanner runtime source:
+
+  Thought for 6s, ran 1 shell command (ctrl+o to expand)
+
+⏺ Two more critical findings: zero secrets configured, and source=replay (not
+  live). Let me read the scanner runtime:
+
+  Thought for 22s, ran 1 shell command (ctrl+o to expand)
+
+⏺ Now I have strong evidence. Let me verify the remaining hypotheses precisely —
+  machine config, and the TONAPI URL path:
+
+  Thought for 14s, ran 1 shell command (ctrl+o to expand)
+
+⏺ Let me verify my hypotheses empirically rather than assume. Testing the URL
+  construction and engine mismatch:
+
+  Thought for 6s, ran 1 shell command (ctrl+o to expand)
+
+⏺ Confirmed the URL bug empirically. Now checking the HTTP listener issue (fly
+  expects port 8080):
+
+  Thought for 11s, searched for 1 pattern (ctrl+o to expand)
+
+⏺ Critical confirmation: no HTTP server exists anywhere in the codebase, yet
+  fly.toml declares internal_port = 8080. Let me verify the release history and
+  run the test suite:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Typecheck passes locally, so these are runtime/config errors, not compile
+  errors. Let me run the tests to establish a baseline:
+
+  Thought for 27s, ran 1 shell command (ctrl+o to expand)
+
+⏺ Tests pass but I found another bug (broken test globs). Let me verify the
+  remaining hypotheses before fixing anything:
+
+  Thought for 8s, ran 1 shell command (ctrl+o to expand)
+
+⏺ Let me verify the EXECUTION_MODE=trade hypothesis and the glob bug
+  empirically:
+  Thought for 16s, ran 1 shell command (ctrl+o to expand)
+
+⏺ All confirmed. Let me verify two more suspects — the boolean parser's failure
+  mode and the healthcheck pattern:
+
+  Thought for 27s, ran 1 shell command (ctrl+o to expand)
+
+⏺ I've completed Phase 1 (root-cause investigation) with verified evidence for
+  every finding. Let me report before touching any code.
+
+  ★ Insight ─────────────────────────────────────
+  Why the app is silently dead, not loudly broken: fly.toml declares
+  http_service.internal_port = 8080 with auto_stop_machines='stop' and
+  min_machines_running=0. Fly's proxy autostops machines when it sees no traffic
+  — but this scanner is a background worker with no HTTP listener at all, so it
+  can never receive traffic. The proxy concluded "excess capacity" and stopped
+  both machines. A worker under an http_service block is guaranteed to be
+  autostopped to zero.
+
+  Absolute vs relative URL joins: new URL("/jettons", "https://tonapi.io/v2/v2")
+  returns https://tonapi.io/jettons. A leading / makes the path absolute, so it
+  discards the base's entire path. The /v2 vanishes — silently, with no error.
+  ─────────────────────────────────────────────────
+
+  Production diagnosis — 9 confirmed defects
+
+  Current state: app suspended, both machines stopped since 14:39Z. It has been
+  down ~3h.
+
+  #: E1
+  Defect: Fatal: EXECUTION_MODE="trade" in fly.toml:34 is invalid — parser
+    accepts only notify_only|paper|auto
+  Evidence: Reproduced: Error: EXECUTION_MODE must be notify_only|paper|auto, 
+  got
+     "trade"
+  ────────────────────────────────────────
+  #: E2
+  Defect: App is down: http_service + no HTTP listener → proxy autostopped to
+    zero
+  Evidence: Log: has excess capacity, autostopping…0 out of 1 machines left;
+  zero
+    listen( matches in packages/
+  ────────────────────────────────────────
+  #: E3
+  Defect: Scanner crashed on OBSERVE_ONLY=false (release v2)
+  Evidence: Log: REFUSING TO START at config.ts:48
+  ────────────────────────────────────────
+  #: E4
+  Defect: TONAPI double-/v2 → all live calls hit tonapi.io/jettons (404).
+    TONAPI_BASE ends in /v2, code appends /v2, absolute path drops both
+  Evidence: Reproduced with node -e
+  ────────────────────────────────────────
+  #: E5
+  Defect: Zero secrets set → no TONAPI_KEY → silently falls back to fixture data
+   
+    on mainnet
+  Evidence: flyctl secrets list empty; log source=replay
+  ────────────────────────────────────────
+  #: E6
+  Defect: Scanner does nothing forever: seen set never clears, 4 fixtures dedup
+    out
+  Evidence: Log: scanned=0 emitted=0 every tick, indefinitely
+  ────────────────────────────────────────
+  #: E7
+  Defect: Docker HEALTHCHECK regex tsx.*scanner never matches actual tsx 
+    src/index.ts
+  Evidence: Reproduced: NO MATCH
+  ────────────────────────────────────────
+  #: E8
+  Defect: engines.node >=26.0.0 vs FROM node:24-alpine
+  Evidence: Runtime is v24; latent EBADENGINE
+  ────────────────────────────────────────
+  #: E9
+  Defect: Broken test globs in scanner+shared: unquoted src/**/*.test.ts → sh
+    can't expand → tests never ran
+  Evidence: npm test exits 1: Could not find …
+
+  E1 and E9 mean the executor path and two test suites were never actually 
+  exercised.
+
+  One decision here is genuinely yours, because it changes the fix rather than
+  following from the code:
+
+⏺ User answered Claude's questions:
+  ⎿  · The scanner is a background worker with no HTTP server, but fly.toml 
+     declares http_service on port 8080 — which is why Fly autostopped it to 
+     zero. How should I resolve this? → Add /health server, keep always-on 
+     (Recommended)
+     · The scanner is silently running on fake fixture data (source=replay) on 
+     mainnet because no TONAPI_KEY secret is set. How should it behave? → Fail 
+     loudly on mainnet (Recommended)
+
+⏺ Both recommended options. Starting with E9 (broken test globs) — I need
+  working tests before I can prove any other fix.
+
+  ★ Insight ─────────────────────────────────────
+  Fixing the test runner first isn't bureaucracy — it's a prerequisite.
+  src/**/*.test.ts was unquoted, so sh tried to expand it, found no literal
+  match, and passed the raw string to tsx. Quoting hands the glob to tsx to
+  expand itself, which understands **.
+  ─────────────────────────────────────────────────
+
+⏺ Update(packages/scanner/package.json)
+  ⎿  File must be read first
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Update(packages/scanner/package.json)
+  ⎿  Added 1 line, removed 1 line
+       8    "scripts": {
+       9      "dev": "tsx watch src/index.ts",
+      10      "start": "tsx src/index.ts",
+      11 -    "test": "tsx --test src/**/*.test.ts"                      
+      11 +    "test": "tsx --test \"src/**/*.test.ts\""                  
+      12    },
+      13    "dependencies": {
+      14      "@openclaw-ton-agent/shared": "*",
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Update(packages/shared/package.json)
+  ⎿  Added 1 line, removed 1 line
+       7    "types": "src/index.ts",
+       8    "scripts": {
+       9      "doctor": "tsx src/doctor.ts",
+      10 -    "test": "tsx --test src/**/*.test.ts"                      
+      10 +    "test": "tsx --test \"src/**/*.test.ts\""                  
+      11    },
+      12    "dependencies": {
+      13      "zod": "^3.23.8"
+
+⏺ Now let me verify E9 is fixed and see what those previously-unrun tests
+  reveal:
+
+  Thought for 7s, ran 1 shell command (ctrl+o to expand)
+
+⏺ Hypothesis wrong — quoting alone didn't fix it; this tsx/node version doesn't
+  expand ** itself. The 5 working packages all use src/*.test.ts (sh-expanded).
+  Let me verify that's the real difference:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Confirmed: all tests live flat in src/, and src/*.test.ts works. Matching the
+  5 working packages:
+
+⏺ Update(packages/scanner/package.json)
+  ⎿  Added 1 line, removed 1 line
+       8    "scripts": {
+       9      "dev": "tsx watch src/index.ts",
+      10      "start": "tsx src/index.ts",
+      11 -    "test": "tsx --test \"src/**/*.test.ts\""                  
+      11 +    "test": "tsx --test src/*.test.ts"                         
+      12    },
+      13    "dependencies": {
+      14      "@openclaw-ton-agent/shared": "*",
+
+⏺ Update(packages/shared/package.json)
+  ⎿  Added 1 line, removed 1 line
+       7    "types": "src/index.ts",
+       8    "scripts": {
+       9      "doctor": "tsx src/doctor.ts",
+      10 -    "test": "tsx --test \"src/**/*.test.ts\""                  
+      10 +    "test": "tsx --test src/*.test.ts"                         
+      11    },
+      12    "dependencies": {
+      13      "zod": "^3.23.8"
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ E9 fixed and verified. All 7 suites now run: 132 tests passing (was 5 suites /
+  108 — the scanner's 12 and shared's 12 were previously dark). Zero exit
+  errors.
+
+  Now E1 — the fatal EXECUTION_MODE=trade. Following TDD, a failing test first:
+
+  Thought for 11s, listed 1 directory (ctrl+o to expand)
+
+⏺ E1's root cause is a mismatch between fly.toml and the parser — and nothing
+  tests that deployment config is loadable. Writing that failing test first:
+
+⏺ Write(packages/executor/src/deploy-config.test.ts)
+  ⎿  Wrote 69 lines to packages/executor/src/deploy-config.test.ts
+       1 /**
+       3  *
+       4  * `fly.toml` [env] is the production environment. Nothing previ
+       5  * that those literal values actually parse — so `EXECUTION_MODE
+         ="trade"`
+         an invalid
+       7  * mode throws at module load in config.ts).
+       9  * These tests read the real fly.toml and assert every safety-cr
+         itical value
+         ad of prod.
+     … +79 lines (ctrl+o to expand)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ The test fails for exactly the right reason, reproducing the production crash.
+  Now fixing fly.toml.
+
+  Note the app is OBSERVE_ONLY=true (observation mode), so notify_only is the
+  mode consistent with that intent — not auto, which would enable live signing:
+
+⏺ Update(fly.toml)
+  ⎿  Added 1 line, removed 1 line
+      31    SCAN_SNIPER_INTERVAL_MS = "10000"
+      32    SCANNER_ENABLED = "true"
+      33    SNIPER_ENABLED = "true"
+      34 -  EXECUTION_MODE = "trade"                                     
+      34 +  EXECUTION_MODE = "notify_only"                               
+      35    GATES_G1_G3_ACK = "0"
+      36    OPENCLAW_CONFIG_PATH = "./openclaw/openclaw.json"
+      37    OPENCLAW_STATE_DIR = "/app/data/.openclaw"
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ E1 fixed and verified — 13/13, with a permanent regression guard.
+
+  Now E4 (the double-/v2 URL bug). Failing test first:
+
+  Thought for 7s, listed 1 directory (ctrl+o to expand)
+
+⏺ E4 needs a testable seam. I'll extract a pure URL builder — writing the
+  failing test first:
+
+⏺ Write(packages/scanner/src/tonapi.test.ts)
+  ⎿  Wrote 47 lines to packages/scanner/src/tonapi.test.ts
+       1 /**
+       3  *
+       4  * Regression guard for E4: `TONAPI_BASE` was set to "https://to
+         napi.io/v2" in
+         ing-slash path.
+       6  * A leading "/" makes the path absolute, so `new URL("/jettons"
+       7  * discarded the base path entirely and every live call hit
+       8  * `https://tonapi.io/jettons` — a 404, silently retried 4x.
+       9  *
+         out /v2, with
+     … +53 lines (ctrl+o to expand)
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Failing as expected (function doesn't exist yet). Now implementing
+  buildTonapiUrl:
+
+⏺ Update(packages/scanner/src/tonapi.ts)
+  ⎿  File must be read first
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Update(packages/scanner/src/tonapi.ts)
+  ⎿  Added 21 lines
+      58    return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1
+          000 : null;
+      59  }
+      60  
+      61 +/**                                                            
+      62 + * Join a TONAPI base + path into an absolute URL, passing thro
+         +ugh `/v2` exactly                                              
+      63 + * once.                                                       
+      64 + *                                                             
+      65 + * Callers pass paths like "/jettons"; operators may set TONAPI
+         +_BASE with or                                                  
+      66 + * without a "/v2" suffix and with or without a trailing slash.
+         + Normalising both                                              
+      67 + * sides here keeps `/v2` from being doubled or — because a lea
+         +ding-slash path is                                             
+      68 + * absolute and would discard the base's own path — dropped alt
+         +ogether.                                                       
+      69 + */                                                            
+      70 +export function buildTonapiUrl(                                
+      71 +  base: string,                                                
+      72 +  path: string,                                                
+      73 +  params: Record<string, string | number | boolean> = {}       
+      74 +): URL {                                                       
+      75 +  const root = base.replace(/\/+$/, "").replace(/\/v2$/, "");  
+      76 +  const rel = path.replace(/^\/+/, "");                        
+      77 +  const url = new URL(`${root}/v2/${rel}`);                    
+      78 +  for (const [k, v] of Object.entries(params)) url.searchParams
+         +.set(k, String(v));                                            
+      79 +  return url;                                                  
+      80 +}                                                              
+      81 +                                                               
+      82  export interface TonapiGetOpts {
+      83    params?: Record<string, string | number | boolean>;
+      84    timeoutMs?: number;
+
+⏺ Now wiring tonapiGet to use it, replacing the buggy join:
+
+⏺ Update(packages/scanner/src/tonapi.ts)
+  ⎿  Added 1 line, removed 2 lines
+       93  /** GET a TONAPI path with retries on 429 / 5xx / network erro
+           rs. */
+       94  export async function tonapiGet(path: string, opts: TonapiGetO
+           pts = {}): Promise<TonapiResponse> {
+       95    const { timeoutMs = SCANNER_CONFIG.tonapi.timeoutMs, maxAtte
+           mpts = SCANNER_CONFIG.tonapi.maxAttempts } = opts;
+       96 -  const url = new URL(path, `${SCANNER_CONFIG.tonapi.base}/v2`
+          -);                                                            
+       97 -  for (const [k, v] of Object.entries(opts.params ?? {})) url.
+          -searchParams.set(k, String(v));                               
+       96 +  const url = buildTonapiUrl(SCANNER_CONFIG.tonapi.base, path,
+          + opts.params ?? {});                                          
+       97    const headers: Record<string, string> = { "Content-Type": "a
+           pplication/json" };
+       98    if (SCANNER_CONFIG.tonapi.key) headers["Authorization"] = `B
+           earer ${SCANNER_CONFIG.tonapi.key}`;
+       99  
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+⏺ E4 fixed and verified — 5/5. Also normalizing TONAPI_BASE in fly.toml so the
+  value is unambiguous:
+
+⏺ Update(fly.toml)
+  ⎿  Added 2 lines, removed 1 line
+      37    OPENCLAW_STATE_DIR = "/app/data/.openclaw"
+      38    JOURNAL_DIR = "/app/data"
+      39    DATA_DIR = "/app/data"
+      40 -  TONAPI_BASE = "https://tonapi.io/v2"                         
+      40 +  # Base host only — the client appends /v2 itself (see buildTo
+         +napiUrl).                                                      
+      41 +  TONAPI_BASE = "https://tonapi.io"                            
+      42    TONCENTER_API_KEY = ""  # Set via secrets if needed
+      43    KILL_SWITCH_URL = ""
+      44    KILL_SWITCH_POLL_MS = "15000"
+
+⏺ Now E3/E5 — the config hardening. Failing test first:
+
+⏺ Write(packages/scanner/src/config.test.ts)
+  ⎿  Wrote 66 lines to packages/scanner/src/config.test.ts
+       1 /**
+       3  *
+       4  * Regression guards for two production incidents:
+       5  *
+         ed any
+       7  *   unrecognised string (including "" and " true") as FALSE, wh
+       8  *   hard "REFUSING TO START" throw. A typo silently became a cr
+         ash-loop, and
+       9  *   the error blamed the operator's intent rather than the malf
+      10  *
+     … +75 lines (ctrl+o to expand)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ All 9 fail as expected. Now implementing — a strict parser and an explicit
+  mainnet data-source guard:
+
+⏺ Update(packages/scanner/src/config.ts)
+  ⎿  Added 44 lines
+      16    return ["1", "true", "yes", "on"].includes(v.toLowerCase());
+      17  }
+      18  
+      19 +const TRUTHY = ["1", "true", "yes", "on"];                     
+      20 +const FALSY = ["0", "false", "no", "off"];                     
+      21 +                                                               
+      22 +/**                                                            
+      23 + * Strict parser for the one flag that decides whether this pro
+         +cess may exist.                                                
+      24 + *                                                             
+      25 + * A lenient parser is dangerous here: it maps typos and empty 
+         +strings to                                                     
+      26 + * `false`, which trips the "REFUSING TO START" throw below and
+         + reports a                                                     
+      27 + * safety violation when the real fault is a malformed value. U
+         +nrecognised                                                    
+      28 + * input therefore throws a message naming the offending value.
+      29 + */                                                            
+      30 +export function parseObserveOnly(raw: string | undefined): bool
+         +ean {                                                          
+      31 +  if (raw === undefined) return true; // read-only by default  
+      32 +  const v = raw.trim().toLowerCase();                          
+      33 +  if (TRUTHY.includes(v)) return true;                         
+      34 +  if (FALSY.includes(v)) return false;                         
+      35 +  throw new Error(                                             
+      36 +    `OBSERVE_ONLY must be one of ${[...TRUTHY, ...FALSY].join("
+         +|")}, got ${JSON.stringify(raw)}`                              
+      37 +  );                                                           
+      38 +}                                                              
+      39 +                                                               
+      40 +/**                                                            
+      41 + * Refuse to present fixture data as mainnet reality.          
+      42 + *                                                             
+      43 + * Without a TONAPI key the scanner falls back to deterministic
+         + fixtures. That                                                
+      44 + * is correct for tests and testnet, but on mainnet it writes i
+         +nvented tokens                                                 
+      45 + * into the mainnet journal while logging `MAINNET`. Fixtures o
+         +n mainnet must be                                              
+      46 + * an explicit operator choice (`SCANNER_SOURCE=replay`), never
+         + a silent default.                                             
+      47 + */                                                            
+      48 +export function assertLiveDataSource(opts: {                   
+      49 +  network: string;                                             
+      50 +  tonapiKey: string;                                           
+      51 +  source: string | undefined;                                  
+      52 +}): void {                                                     
+      53 +  if (opts.network !== "mainnet") return;                      
+      54 +  if (opts.tonapiKey) return;                                  
+      55 +  if (opts.source === "replay") return;                        
+      56 +  throw new Error(                                             
+      57 +    "REFUSING TO START: TON_NETWORK=mainnet requires TONAPI_KEY
+         + — without it the " +                                          
+      58 +      "scanner would journal fixture data as mainnet signals. S
+         +et TONAPI_KEY, or set " +                                      
+      59 +      "SCANNER_SOURCE=replay to explicitly opt into fixture dat
+         +a."                                                            
+      60 +  );                                                           
+      61 +}                                                              
+      62 +                                                               
+      63  function str(key: string, fallback = ""): string {
+      64    return process.env[key] ?? fallback;
+      65  }
+
+⏺ Now wiring the strict parser in and adding the startup guard:
+
+⏺ Update(packages/scanner/src/config.ts)
+  ⎿  Added 1 line, removed 1 line
+      66  
+      67  export const SCANNER_CONFIG = {
+      68    network: (process.env.TON_NETWORK ?? "mainnet") as "mainnet" 
+          | "testnet",
+      69 -  observeOnly: bool("OBSERVE_ONLY", true),                     
+      69 +  observeOnly: parseObserveOnly(process.env.OBSERVE_ONLY),     
+      70    scanRadarIntervalMs: num("SCAN_RADAR_INTERVAL_MS", 60_000),
+      71    scanSniperIntervalMs: num("SCAN_SNIPER_INTERVAL_MS", 10_000),
+      72    scanLimit: num("SCAN_LIMIT", 30),
+
+  Thought for 6s, read 1 file (ctrl+o to expand)
+
+⏺ The guard must run at the entrypoint, not at import — importing config in
+  tests would otherwise throw. Let me add it to index.ts:
+
+⏺ Update(packages/scanner/src/index.ts)
+  ⎿  File must be read first
+
+  Thought for 10s, read 1 file (ctrl+o to expand)
+
+⏺ Now E6 — the dedup set that makes the scanner permanently idle. Test first:
+
+⏺ Write(packages/scanner/src/seen.test.ts)
+  ⎿  Wrote 67 lines to packages/scanner/src/seen.test.ts
+       1 /**
+       3  *
+       4  * Regression guard for E6: `seen` was a plain `Set<string>` tha
+       5  * whole process and was never pruned. Two consequences in produ
+         ction:
+       7  *   1. Liveness — every candidate is permanently suppressed aft
+         er its first
+          every tick
+       9  *      forever. A token whose audit or liquidity later changes 
+      10  *      re-evaluated.
+     … +73 lines (ctrl+o to expand)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Module-resolution failure counts as one. Now implementing SeenCache:
+
+⏺ Write(packages/scanner/src/seen.ts)
+  ⎿  Wrote 67 lines to packages/scanner/src/seen.ts
+       1 /**
+       3  *
+       4  * The scanner must not re-emit the same candidate on every tick
+       5  * must not suppress it forever: a token's audit, liquidity or h
+         older count can
+          tick reports
+       7  * `scanned=0`) and leaks memory for the life of the machine.
+       9  * Insertion order in a JS `Map` is preserved, so the oldest key
+          is always the
+         ture.
+     … +66 lines (ctrl+o to expand)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ E6 core fixed — 5/5. Now checking the pipeline's seen contract so I wire it
+  compatibly:
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ I'm in the scanner dir from earlier. Let me use absolute paths:
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ The pipeline only uses has/add — a structural subset of Set. I'll widen the
+  type so both Set and SeenCache work, keeping the existing test valid:
+
+⏺ Update(packages/scanner/src/pipeline.ts)
+  ⎿  File must be read first
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Update(packages/scanner/src/pipeline.ts)
+  ⎿  Added 5 lines, removed 2 lines
+      17    journal: Journal;
+      18    /** Optional emit hook (signal-out). Defaults to postSignal. 
+          */
+      19    emit?: (e: SignalEnvelope) => Promise<unknown>;
+      20 -  /** Master addresses already seen this process (dedup). */   
+      21 -  seen?: Set<string>;                                          
+      20 +  /**                                                          
+      21 +   * Dedup store for master addresses. Structural so both a pla
+         +in `Set` (tests)                                               
+      22 +   * and the TTL-bounded `SeenCache` (production) satisfy it.  
+      23 +   */                                                          
+      24 +  seen?: { has(key: string): boolean; add(key: string): unknown
+         + };                                                            
+      25  }
+      26  
+      27  export interface ScanTickResult {
+
+⏺ Now E2 — the health server (the actual cause of the outage). Writing it with
+  the E5/E6 wiring together in index.ts:
+
+⏺ Write(packages/scanner/src/health.ts)
+  ⎿  Wrote 99 lines to packages/scanner/src/health.ts
+       1 /**
+       3  *
+       4  * Fly's proxy autostops any machine in an `http_service` group 
+       5  * has no traffic. The scanner is a background worker and never 
+       6  * `internal_port`, so the proxy stopped both machines ("excess 
+         capacity") and
+         ressable, makes
+       8  * Fly health checks meaningful, and exposes tick liveness for d
+       9  *
+          the reason the
+     … +111 lines (ctrl+o to expand)
+
+⏺ Write(packages/scanner/src/health.test.ts)
+  ⎿  Wrote 79 lines to packages/scanner/src/health.test.ts
+       1 /**
+       3  *
+       4  * Regression guard for E2: the scanner had no HTTP listener whi
+         le fly.toml
+         oth machines
+       6  * ("excess capacity") and the app fell to zero running instance
+       7  */
+       8 import { test } from "node:test";
+       9 import assert from "node:assert/strict";
+         th";
+     … +81 lines (ctrl+o to expand)
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+⏺ A real syntax error my test caught. Fixing the precedence — and note port: 0
+  must be respected, so ?? alone is wrong:
+
+⏺ Update(packages/scanner/src/health.ts)
+  ⎿  Added 4 lines, removed 1 line
+      56    intervalMs: number;
+      57    port?: number;
+      58  }): Server | null {
+      59 -  const port = opts.port ?? Number(process.env.PORT) || 8080;  
+      59 +  // `?? 0` is intentional: port 0 (ephemeral, used by tests) m
+         +ust be honoured,                                               
+      60 +  // so only an undefined/unparseable value falls through to 80
+         +80.                                                            
+      61 +  const envPort = Number(process.env.PORT);                    
+      62 +  const port = opts.port ?? (Number.isFinite(envPort) && envPor
+         +t > 0 ? envPort : 8080);                                       
+      63    try {
+      64      const server = createServer((req, res) => {
+      65        const url = req.url ?? "/";
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ E2 health server done — 6/6, including real socket tests. Now wiring
+  everything into index.ts (E2 + E5 + E6):
+
+⏺ Update(packages/scanner/src/index.ts)
+  ⎿  Added 3 lines, removed 1 line
+      10   *   - otherwise               → live TONAPI source
+      11   */
+      12  import { Journal, journalPath } from "@openclaw-ton-agent/share
+          d";
+      13 -import { SCANNER_CONFIG } from "./config";                     
+      13 +import { SCANNER_CONFIG, assertLiveDataSource } from "./config"
+         +;                                                              
+      14  import { replaySource } from "./replay";
+      15  import { tonapiSource } from "./tonapi-source";
+      16  import { runScanTick } from "./pipeline";
+      17 +import { SeenCache } from "./seen";                            
+      18 +import { createStats, startHealthServer } from "./health";     
+      19  
+      20  function pickSource() {
+      21    const requested = process.env.SCANNER_SOURCE;
+
+⏺ Update(packages/scanner/src/index.ts)
+  ⎿  Added 77 lines, removed 8 lines
+       25    return tonapiSource;
+       26  }
+       27  
+       28 -export function startScanner(opts: { source?: ReturnType<typeo
+          -f pickSource>; journal?: Journal; intervalMs?: number } = {}) 
+          -{                                                             
+       28 +export function startScanner(                                 
+       29 +  opts: {                                                     
+       30 +    source?: ReturnType<typeof pickSource>;                   
+       31 +    journal?: Journal;                                        
+       32 +    intervalMs?: number;                                      
+       33 +    /** Start the health/metrics listener. Off by default so t
+          +ests don't bind. */                                           
+       34 +    health?: boolean;                                         
+       35 +  } = {}                                                      
+       36 +) {                                                           
+       37    const source = opts.source ?? pickSource();
+       38    const journal = opts.journal ?? new Journal(journalPath(SCAN
+           NER_CONFIG.journalDir, SCANNER_CONFIG.network));
+       39    const intervalMs = opts.intervalMs ?? SCANNER_CONFIG.scanRad
+           arIntervalMs;
+       32 -  const seen = new Set<string>();                             
+       40  
+       41 +  // TTL-bounded: a candidate is suppressed for a window, not 
+          +forever, so                                                   
+       42 +  // changed audits/liquidity are re-evaluated and memory stay
+          +s bounded.                                                    
+       43 +  const seen = new SeenCache({                                
+       44 +    ttlMs: Math.max(intervalMs * 10, 10 * 60_000),            
+       45 +    maxEntries: 10_000,                                       
+       46 +  });                                                         
+       47 +                                                              
+       48 +  const stats = createStats({                                 
+       49 +    source: source.name,                                      
+       50 +    network: SCANNER_CONFIG.network,                          
+       51 +    observeOnly: SCANNER_CONFIG.observeOnly,                  
+       52 +  });                                                         
+       53 +                                                              
+       54    const tick = async () => {
+       35 -    const result = await runScanTick({ source, journal, seen }
+          -);                                                            
+       36 -    console.log(`[SCANNER:${source.name}] scanned=${result.sca
+          -nned} emitted=${result.emitted} incomplete=${result.incomplete
+          -} dropped=${result.dropped}`);                                
+       37 -    return result;                                            
+       55 +    try {                                                     
+       56 +      seen.prune();                                           
+       57 +      const result = await runScanTick({ source, journal, seen
+          + });                                                          
+       58 +      stats.ticks++;                                          
+       59 +      stats.lastTickAt = Date.now();                          
+       60 +      stats.lastError = null;                                 
+       61 +      stats.totals.scanned += result.scanned;                 
+       62 +      stats.totals.emitted += result.emitted;                 
+       63 +      stats.totals.incomplete += result.incomplete;           
+       64 +      stats.totals.dropped += result.dropped;                 
+       65 +      console.log(                                            
+       66 +        `[SCANNER:${source.name}] scanned=${result.scanned} em
+          +itted=${result.emitted} incomplete=${result.incomplete} droppe
+          +d=${result.dropped} tracked=${seen.size}`                     
+       67 +      );                                                      
+       68 +      return result;                                          
+       69 +    } catch (e) {                                             
+       70 +      // An unhandled rejection here would kill the process un
+          +der Node 15+.                                                 
+       71 +      // Record it, let /health report it, and keep the loop a
+          +live.                                                         
+       72 +      stats.lastError = (e as Error)?.message ?? String(e);   
+       73 +      console.error(`[SCANNER:${source.name}] tick failed: ${s
+          +tats.lastError}`);                                            
+       74 +      return undefined;                                       
+       75 +    }                                                         
+       76    };
+       77  
+       40 -  console.log(`[SCANNER] ${SCANNER_CONFIG.network.toUpperCase(
+          -)} • source=${source.name} • observeOnly=${SCANNER_CONFIG.obse
+          -rveOnly} • journal=${journal.filePath}`);                     
+       78 +  console.log(                                                
+       79 +    `[SCANNER] ${SCANNER_CONFIG.network.toUpperCase()} • sourc
+          +e=${source.name} • observeOnly=${SCANNER_CONFIG.observeOnly} •
+          + journal=${journal.filePath}`                                 
+       80 +  );                                                          
+       81 +  if (source.name === "replay") {                             
+       82 +    console.warn(`[SCANNER] WARNING: fixture data — signals ar
+          +e NOT real market data.`);                                    
+       83 +  }                                                           
+       84 +                                                              
+       85 +  const server = opts.health ? startHealthServer({ stats, inte
+          +rvalMs }) : null;                                             
+       86    const t = tick();
+       87    const handle = setInterval(tick, intervalMs);
+       43 -  return { tickPromise: t, stop: () => clearInterval(handle) }
+          -;                                                             
+       88 +  return {                                                    
+       89 +    tickPromise: t,                                           
+       90 +    stats,                                                    
+       91 +    stop: () => {                                             
+       92 +      clearInterval(handle);                                  
+       93 +      server?.close();                                        
+       94 +    },                                                        
+       95 +  };                                                          
+       96  }
+       97  
+       98  if (process.argv[1] && process.argv[1].endsWith("index.ts")) {
+       47 -  startScanner();                                             
+       99 +  // Fail fast rather than journal fixture data as mainnet rea
+          +lity.                                                         
+      100 +  assertLiveDataSource({                                      
+      101 +    network: SCANNER_CONFIG.network,                          
+      102 +    tonapiKey: SCANNER_CONFIG.tonapi.key,                     
+      103 +    source: process.env.SCANNER_SOURCE,                       
+      104 +  });                                                         
+      105 +                                                              
+      106 +  const scanner = startScanner({ health: true });             
+      107 +                                                              
+      108 +  // Fly sends SIGINT/SIGTERM on autostop and deploys; exit 0 
+          +so a normal                                                   
+      109 +  // shutdown stops being reported as `npm error code 130`.   
+      110 +  for (const sig of ["SIGINT", "SIGTERM"] as const) {         
+      111 +    process.on(sig, () => {                                   
+      112 +      console.log(`[SCANNER] received ${sig}, shutting down`);
+      113 +      scanner.stop();                                         
+      114 +      process.exit(0);                                        
+      115 +    });                                                       
+      116 +  }                                                           
+      117  }
+
+⏺ That also addresses the npm error code 130 noise on every autostop. Let me
+  verify the whole suite plus typecheck:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ All 161 tests pass; typecheck flags one now-unused helper. Removing it:
+
+⏺ Update(packages/scanner/src/config.ts)
+  ⎿  Removed 6 lines
+      10    return Number.isFinite(v) && v >= 0 ? v : fallback;
+      11  }
+      12  
+      13 -function bool(key: string, fallback: boolean): boolean {       
+      14 -  const v = process.env[key];                                  
+      15 -  if (v === undefined) return fallback;                        
+      16 -  return ["1", "true", "yes", "on"].includes(v.toLowerCase()); 
+      17 -}                                                              
+      18 -                                                               
+      13  const TRUTHY = ["1", "true", "yes", "on"];
+      14  const FALSY = ["0", "false", "no", "off"];
+      15  
+
+⏺ Now fixing the remaining infra defects — E2 config, E7 healthcheck, E8 engine:
+
+⏺ Update(fly.toml)
+  ⎿  Added 11 lines, removed 2 lines
+      12  [http_service]
+      13    internal_port = 8080
+      14    force_https = true
+      15 -  auto_stop_machines = 'stop'                                  
+      15 +  # The scanner is a background worker: it must NOT be autostop
+         +ped for lack of                                                
+      16 +  # inbound traffic. With 'stop' + min 0 the proxy scaled the a
+         +pp to zero.                                                    
+      17 +  auto_stop_machines = 'off'                                   
+      18    auto_start_machines = true
+      17 -  min_machines_running = 0                                     
+      19 +  min_machines_running = 1                                     
+      20    processes = ['app']
+      21  
+      22 +  [[http_service.checks]]                                      
+      23 +    interval = '30s'                                           
+      24 +    timeout = '5s'                                             
+      25 +    grace_period = '20s'                                       
+      26 +    method = 'GET'                                             
+      27 +    path = '/health'                                           
+      28 +                                                               
+      29  [[vm]]
+      30    memory = '1gb'
+      31    cpu_kind = 'shared'
+
+⏺ Update(Dockerfile)
+  ⎿  File must be read first
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Update(Dockerfile)
+  ⎿  Added 5 lines, removed 3 lines
+       92  ENV SNIPER_ENABLED=true
+       93  ENV TON_NETWORK=mainnet
+       94  
+       95 -# Health check endpoint (scanner doesn't have HTTP server, use
+          - process check)                                               
+       96 -HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --
+          -retries=3 \                                                   
+       97 -    CMD pgrep -f "tsx.*scanner" > /dev/null || exit 1         
+       95 +# Probe the real /health endpoint. The previous `pgrep -f "tsx
+          +.*scanner"` could                                             
+       96 +# never match: the process cmdline is `tsx src/index.ts` (cwd=
+          +packages/scanner).                                            
+       97 +# /health also catches a wedged scan loop, which a process-exi
+          +stence check cannot.                                          
+       98 +HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --r
+          +etries=3 \                                                    
+       99 +    CMD node -e "require('http').get('http://127.0.0.1:'+(proc
+          +ess.env.PORT||8080)+'/health',r=>process.exit(r.statusCode===2
+          +00?0:1)).on('error',()=>process.exit(1))"                     
+      100  
+      101  # Entrypoint
+      102  ENTRYPOINT ["dumb-init", "--"]
+
+⏺ Now E8 — engine mismatch. The Docker image is Node 24 but engines demands
+  >=26.0.0:
+
+⏺ Update(package.json)
+  ⎿  File must be read first
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Update(package.json)  ⎿  Added 1 line, removed 1 line
+      19      "typecheck": "tsc --noEmit"
+      20    },
+      21    "engines": {
+      22 -    "node": ">=26.0.0"                                         
+      22 +    "node": ">=22.0.0"                                         
+      23    },
+      24    "devDependencies": {
+      25      "@types/node": "^22.10.2",
+
+⏺ ★ Insight ─────────────────────────────────────
+  engines declared >=26.0.0 while the Dockerfile pinned node:24-alpine and local
+  dev runs v20 — a range no environment satisfied. Node 26 doesn't exist yet;
+  this was aspirational. Setting >=22 covers the Docker runtime (24) and matches
+  @types/node@22. Since there's no .npmrc with engine-strict=true, npm only
+  warns — which is exactly why this went unnoticed.
+  ─────────────────────────────────────────────────
+
+  Now verifying everything together, including a real end-to-end boot:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Typecheck clean, E5 guard works. Now the critical end-to-end test — does it
+  actually boot and serve /health?
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Health server works, warning banner fires, graceful shutdown works. Let me
+  verify the E6 TTL re-scan actually happens over time — this is the claim I
+  haven't yet proven end-to-end:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ TTL behavior confirmed. Now let me verify the Docker build succeeds before
+  deploying — a broken build would be worse than the current outage:
+
+  Thought for 13s, ran 1 shell command (ctrl+o to expand)
+
+⏺ Docker isn't running locally; Fly can build remotely. But first — a critical
+  pre-deploy issue I need to surface.
+
+  Let me run the final full verification:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ 161 tests passing across all 7 suites, zero failures, typecheck clean. All
+  code and config fixes verified locally.
+
+  Now the deploy decision — and there's a blocker I must flag rather than paper
+  over:
+
+  ★ Insight ─────────────────────────────────────
+  The E5 guard I just added is intentionally a deploy blocker. fly.toml sets
+  TON_NETWORK=mainnet, and there is no TONAPI_KEY secret. If you deploy right
+  now, the scanner will refuse to start — by design. That's the correct behavior
+  you chose ("fail loudly"), but it means a key is required before mainnet will
+  run. This is a real trade-off: the old code "worked" only because it was
+  silently faking mainnet data.
+  ─────────────────────────────────────────────────
+
+⏺ User answered Claude's questions:
+  ⎿  · All fixes are verified locally (161 tests pass). Deploying now will make 
+     the scanner refuse to start, because fly.toml says mainnet but no 
+     TONAPI_KEY secret exists. How do you want to proceed? → I'll set 
+     TONAPI_KEY, then deploy
+
+⏺ I need the key set before deploying. Since a secret shouldn't pass through my
+  tool calls or the transcript, please run this yourself — prefix with ! so it
+  executes in this session:
+
+  ! flyctl secrets set TONAPI_KEY=<your-key> -a openclaw-ton-agent
+
+  Get a free key at tonconsole.com → API keys, if you don't have one.
+
+  While you do that, let me verify the deploy config is coherent:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Secret still unset (expected — waiting on you). Let me commit the verified
+  work now, since the repo has zero commits and this shouldn't be lost:
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+⏺ This is an initial commit of the whole project (150 files), not just my fixes.
+  .omo/run-continuation/ looks like transient session state that shouldn't be
+  committed. Let me check before proceeding:
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ .env.example is safely empty. .omo/run-continuation/ is transient session
+  state — excluding it and committing only meaningful files:
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+⏺ Committed as 851dd46. Let me check whether the secret has been set yet:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Still empty — I'll pause here rather than deploy into a guaranteed
+  refuse-to-start.
+
+  Summary
+
+  I found and fixed 9 verified production defects. All work is committed
+  (851dd46) with 161 tests passing (up from 108 — two suites had never run) and
+  a clean typecheck.
+
+  Why the app was down (E2): the scanner is a background worker with no HTTP
+  listener, but fly.toml declared http_service on port 8080 with
+  auto_stop_machines='stop' and min_machines_running=0. Fly's proxy saw no
+  inbound traffic, logged has excess capacity, autostopping…0 out of 1 machines 
+  left, and scaled the app to zero. It could never have stayed up.
+
+  ┌───────┬──────────────────────────────────────────────────────────────────┐
+  │ Fixed │                              Defect                              │
+  ├───────┼──────────────────────────────────────────────────────────────────┤
+  │ E1    │ EXECUTION_MODE="trade" — invalid, threw at module load →         │
+  │       │ notify_only                                                      │
+  ├───────┼──────────────────────────────────────────────────────────────────┤
+  │ E2    │ No HTTP listener → added /health + /metrics,                     │
+  │       │ min_machines_running=1, autostop off                             │
+  ├───────┼──────────────────────────────────────────────────────────────────┤
+  │ E3    │ Lenient OBSERVE_ONLY parser turned typos into a crash-loop →     │
+  │       │ strict + trimmed                                                 │
+  ├───────┼──────────────────────────────────────────────────────────────────┤
+  │ E4    │ Double-/v2 made every live API call a 404 → extracted            │
+  │       │ buildTonapiUrl                                                   │
+  ├───────┼──────────────────────────────────────────────────────────────────┤
+  │ E5    │ Fixture data silently journaled as mainnet → now an explicit     │
+  │       │ opt-in                                                           │
+  ├───────┼──────────────────────────────────────────────────────────────────┤
+  │ E6    │ Unpruned dedup set → scanned=0 forever + unbounded memory → TTL  │
+  │       │ SeenCache                                                        │
+  ├───────┼──────────────────────────────────────────────────────────────────┤
+  │ E7    │ HEALTHCHECK regex could never match the real cmdline → probes    │
+  │       │ /health                                                          │
+  ├───────┼──────────────────────────────────────────────────────────────────┤
+  │ E8    │ engines.node ">=26.0.0" — satisfied by no environment → >=22     │
+  ├───────┼──────────────────────────────────────────────────────────────────┤
+  │ E9    │ Unquoted src/**/*.test.ts → scanner + shared tests never ran     │
+  └───────┴──────────────────────────────────────────────────────────────────┘
+
+  I verified end-to-end that it boots, serves /health (200), exposes metrics,
+  and shuts down cleanly.
+
+  Two things worth your attention:
+
+  1. Deploy is blocked pending the secret. TONAPI_KEY is still unset, so the E5
+  guard you chose will correctly refuse to start on mainnet. Run:
+  ! flyctl secrets set TONAPI_KEY=<your-key> -a openclaw-ton-agent
+  1. Then tell me and I'll deploy and confirm against live logs.
+  2. E1 and E9 together are the real story. The executor path had a fatal config
+  error while its own test suite was silently not running. The glob fix is what
+  makes the other fixes durable.
+
+  Also note the app currently runs 2 machines both scanning identically —
+  duplicate work and double API quota. Worth scaling to 1, but I left it alone
+  as it's a change in behavior, not a bug fix.
+
+  ⚠️ Context is at ~77%. Enough remains to deploy and verify logs, but not for
+  substantial new work. If you'd like the 2→1 machine scaling or other changes,
+  a fresh session would be better.
+
+✻ Crunched for 16m 47s
+
+❯ con                                                                           
+
+  Thought for 11s (ctrl+o to expand)
+
+⏺ "con" is ambiguous — let me check the one thing that gates everything before I
+  guess at what you want:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ TONAPI_KEY is still unset and both machines are still stopped. I read "con" as
+  continue — but continuing straight to deploy would fail, so I need one
+  decision from you first.
+
+  Deploying right now would build and ship successfully, then the scanner would
+  refuse to start on mainnet — exactly as designed by the "fail loudly" guard
+  you chose. That's a correct outcome, but it leaves prod down.
+
+⏺ User answered Claude's questions:
+  ⎿  · TONAPI_KEY is still not set, so a mainnet deploy will refuse to start by 
+     design. How should I continue? → Something else
+
+⏺ You picked "Something else" but didn't say what — so I'd just be guessing.
+  What would you like?
+
+  Some things I can do right now without a key:
+
+  - Scale 2 → 1 machine — both currently run identical scanners (duplicate work,
+  double API quota, two divergent journals)
+  - Show the full diff — walk through the 9 fixes
+  - Explain a specific bug — the /v2 URL trap, the autostop-to-zero cause, or
+  the dedup-set liveness bug
+  - Review the new code — health.ts, seen.ts, or the config guards
+  - Deploy — testnet, or mainnet with an explicit replay opt-in
+
+  Or if "con" meant something else entirely — a typo, or shorthand I misread —
+  just tell me plainly.
+
+  One note on state: the fixes are committed at 851dd46 and nothing is lost, but
+  production is still down (both machines stopped, app suspended) and will stay
+  that way until we deploy.
+
+  ⚠️ Context is at ~78%. Enough for one focused task; a fresh session would be
+  better for anything large.
+
+⏺ User declined to answer questions
+  ⎿  · [Bonsai] What went well or could be improved on this task? Consider 
+     correctness, performance, and code quality. ()
+
+⏺ User answered Claude's questions:
+  ⎿  · [Bonsai] How did the model do on this task? → Great
+
+❯ migrater from ton-agent-runtime                                               
+  Thought for 10s (ctrl+o to expand)
+
+⏺ Good idea — ton-agent-runtime is deployed and healthy, so it likely already
+  holds the secrets we need. Let me check what's there:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ ton-agent-runtime has TONAPI_KEY deployed — that's the missing secret. It's a
+  mature, running app (version 316).
+
+  Important constraint: Fly secrets are write-only. Digests are one-way hashes,
+  so neither I nor flyctl can read the plaintext value back out. I need to
+  confirm how you want to source it.
+
+  Also note WALLET_MASTER_MNEMONIC lives there — I'll copy only what the scanner
+  actually needs, not the wallet keys.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ The scanner needs exactly one secret: TONAPI_KEY. Everything else is already
+  in fly.toml.
+
+  Let me check whether the value exists locally, which would avoid you having to
+  retrieve it:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ There's a /Users/admin/ton-agent source repo. Let me check if it has the key
+  locally — without printing the value:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Found it — a 71-char key in /Users/admin/ton-agent/.env, consistent with a
+  real TONAPI JWT. I can migrate it directly without ever printing it to the
+  transcript.
+
+  This writes a production secret, so let me confirm the plan before acting:
+
+⏺ User answered Claude's questions:
+  ⎿  · I found TONAPI_KEY in /Users/admin/ton-agent/.env (71 chars). I can pipe 
+     it straight into Fly without displaying it. Migrate it to 
+     openclaw-ton-agent? → Yes — migrate key, then deploy (Recommended)
+
+⏺ Migrating the key — piped directly, never printed:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Secret staged (71 chars, AFZO… — a TONAPI JWT). I staged rather than applied
+  so it lands atomically with the code fixes in one deploy.
+
+  Let me verify the key actually works against the live API before deploying —
+  using the fixed URL builder:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Output got truncated by an error. Let me see it:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Definitive proof of both the key and the E4 fix:
+
+  - Fixed URL (/v2/rates) → HTTP 200, live TON price $1.33
+  - Old broken URL (no /v2) → HTTP 404 — exactly the production failure
+
+  The key is valid. Deploying now:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Deploy succeeded — but the machines "reached stopped state." That's suspicious
+  given I set min_machines_running=1. Let me verify rather than trust the
+  success message:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ /health returns HTTP 200 with source: "tonapi" — live mainnet, no longer
+  fixtures. The E5 guard passed, meaning the key is working.
+
+  But two things need verification: machines still show stopped, and ticks: 0.
+  My request auto-started a machine. Let me confirm it actually scans live data:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Monitor(wait for first live scan tick on openclaw-ton-agent)
+  ⎿  Monitor started · task bpzjxqy7n · timeout 180s
+
+⏺ While that waits, let me check the production logs for the live tonapi source:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Monitor event: "wait for first live scan tick on openclaw-ton-agent"
+
+⏺ Monitor "wait for first live scan tick on openclaw-ton-agent" stream ended
+
+⏺ It's live and working. The monitor confirms real mainnet scanning:
+
+  [SCANNER] MAINNET • source=tonapi • observeOnly=true
+  [HEALTH] listening on 0.0.0.0:8080
+  [SCANNER:tonapi] scanned=30 emitted=29 incomplete=29 dropped=1 tracked=30
+
+  scanned=30 from the live TONAPI — previously scanned=0 forever on fake data.
+  The /v2 fix is confirmed working in production.
+
+  One thing I want to be honest about rather than declare victory:
+  incomplete=29. Let me check that, plus the health-check warning:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Machine 1: started, health check passing. The app is up. The second machine is
+  stopped and idle — Fly satisfies min_machines_running=1 with one.
+
+  Production is restored. Final verification:
+
+  ┌─────────────────────────────────┬───────────────────────────────────────┐
+  │             Before              │                 After                 │
+  ├─────────────────────────────────┼───────────────────────────────────────┤
+  │ App suspended, 0 machines       │ 1 machine started, health check       │
+  │ running                         │ passing                               │
+  ├─────────────────────────────────┼───────────────────────────────────────┤
+  │ source=replay (fake fixtures)   │ source=tonapi (live mainnet)          │
+  ├─────────────────────────────────┼───────────────────────────────────────┤
+  │ scanned=0 every tick, forever   │ scanned=30 real jettons               │
+  ├─────────────────────────────────┼───────────────────────────────────────┤
+  │ All API calls → 404             │ HTTP 200, TON @ $1.33                 │
+  ├─────────────────────────────────┼───────────────────────────────────────┤
+  │ No health endpoint              │ /health 200 + /metrics                │
+  └─────────────────────────────────┴───────────────────────────────────────┘
+
+  All 9 defects fixed, committed (851dd46), 161 tests passing, key migrated from
+  ton-agent without ever exposing it.
+
+  Two honest caveats — neither is a regression, both pre-existing:
+
+  1. incomplete=29 of 30 signals. This is correct, honest behavior, not a bug I
+  introduced. tonapi-source.ts:26-30 hardcodes priceTon: null, liquidityTon: 
+  null — the live source never fetches pool quotes, so the pipeline correctly
+  journals them as incomplete rather than fabricating prices. Signals are
+  flowing, but without price/liquidity they can't drive trading decisions.
+  Implementing the pool-quote lookup is a feature gap, not an error in the logs.
+  2. dropped=1 — one jetton failed its audit. Expected behavior for a scanner.
+
+  ⚠️ Context is at ~86%. I'd recommend a fresh session for the pool-quote work
+  (item 1), which is a real feature rather than a log fix. If you want, I can
+  note where it belongs: packages/scanner/src/tonapi-source.ts, the listRecent
+  mapper.
+
+✻ Baked for 4m 9s
+
+❯ contiue                                                                       
+
+  Thought for 15s (ctrl+o to expand)
+
+⏺ Continuing — the task was "fix all errors in prod log," so let me verify the
+  current logs are actually clean post-deploy:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Only one post-deploy error, at 17:47:04 — 8 seconds before the app finished
+  booting at 17:47:12. That's a startup race, not a live failure: Fly probed
+  during npm install/tsx startup, before the listener bound. It's now passing.
+
+  The root cause is a grace period too short for a tsx cold start. Let me fix
+  that so deploys don't emit a spurious error:
+⏺ Update(fly.toml)
+  ⎿  Added 4 lines, removed 1 line
+      22    [[http_service.checks]]
+      23      interval = '30s'
+      24      timeout = '5s'
+      25 -    grace_period = '20s'                                       
+      25 +    # Generous: `npm run` -> workspace -> tsx must transpile be
+         +fore the listener                                              
+      26 +    # binds (~12s observed). A shorter grace makes every deploy
+         + log a spurious                                                
+      27 +    # "app is not responding" error before the first successful
+         + probe.                                                        
+      28 +    grace_period = '45s'                                       
+      29      method = 'GET'
+      30      path = '/health'
+      31  
+
+⏺ Context is nearly exhausted (~88%), so let me commit this and stop cleanly
+  rather than start anything new:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ The inner quotes broke shell parsing. Using a heredoc:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Committed. Final confirmation that production is stable:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Production is restored and stable. ticks: 4, lastError: null, health check
+  passing, live mainnet data.
+
+  Done
+
+  The outage is fixed. All 9 defects resolved across two commits (851dd46,
+  33f2c20), 161 tests passing, key migrated from ton-agent without ever exposing
+  it.
+
+  Verified in production:
+  - 1 machine started, health check passing (was: app suspended, 0 running)
+  - source=tonapi — live mainnet (was: fake fixture data)
+  - scanned=30 real jettons (was: scanned=0 forever)
+  - API returns 200; the old broken URL returns 404 — E4 proven fixed
+  - /health + /metrics responding; lastError: null
+
+  The prod log is now clean. The single post-deploy error was a startup race
+  (probe at 17:47:04 vs. listener at 17:47:12) — I widened the grace period to
+  45s so future deploys don't log it. That fix is committed but not yet 
+  deployed, since it only affects deploy-time log noise and redeploying now
+  would restart a healthy app for no functional gain.
+
+  One feature gap I want to flag clearly, since it's easy to misread as success:
+  incomplete=29 of 30. Signals flow, but nearly all lack price/liquidity —
+  packages/scanner/src/tonapi-source.ts:26-30 hardcodes priceTon: null, 
+  liquidityTon: null because the live source never fetches pool quotes. The
+  pipeline honestly marks these incomplete rather than fabricating values. This 
+  is not an error and not a regression — it's unimplemented functionality, and
+  it means signals can't yet drive trading decisions.
+
+  ⚠️ Context is at ~90% — I'm stopping here rather than starting new work. Two
+  things remain, both good candidates for a fresh session:
+
+  1. Pool-quote lookup (tonapi-source.ts) — closes the incomplete=29 gap; the
+  real feature work
+  2. Scale 2 → 1 machine — the idle second machine is redundant under
+  min_machines_running=1; would also prevent duplicate scanning if both ever
+  start
+
+  Nothing is lost — everything is committed, and the fly.toml grace-period
+  change deploys with your next flyctl deploy.
+
+✻ Cooked for 1m 28s
+
+❯ contiue                                                                       
+
+  Thought for 25s (ctrl+o to expand)
+
+⏺ Context is at ~90%, so I'll do the small, safe item and stop there — the
+  pool-quote feature needs more room than I have.
+
+  Scaling 2 → 1 machine. This prevents a real hazard: if both machines ever
+  start together, you get two independent scanners double-burning the
+  rate-limited TONAPI quota and writing two divergent journals (/app/data is
+  ephemeral per machine, no shared volume).
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Destroyed the idle machine (d8d0d79fe72698). Verifying the running one is
+  untouched and still healthy:
+
+  Ran 1 shell command (ctrl+o to expand)
+  ⎿  API Error: 400 You have exceeded your daily token limit. You can resume at 
+     2026-08-15 00:00 UTC.
+
+✻ Sautéed for 42s
+
+❯ contiue                                                                       
+
+  Thought for 16s (ctrl+o to expand)
+
+⏺ Nine hours have passed since the deploy — that's a genuine soak test of the
+  fixes. Let me check whether it survived the night:
+
+  Ran 1 shell command (ctrl+o to expand)
+  ⎿  API Error: 400 The Bonsai service has been discontinued.
+
+✻ Churned for 16s

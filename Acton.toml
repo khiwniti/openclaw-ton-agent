@@ -1,0 +1,29 @@
+[package]
+name = "my-acton-project"
+description = "A TON blockchain project"
+version = "0.1.0"
+license = "MIT"
+
+[contracts.Counter]
+src = "contracts/Counter.tolk"
+
+[build]
+out-dir = "build"
+gen-dir = "gen"
+
+[fmt]
+width = 100
+ignore = []
+
+[import-mappings]
+acton = ".acton"
+contracts = "contracts"
+gen = "gen"
+tests = "tests"
+wrappers = "wrappers"
+
+[test]
+fork-net = "testnet"
+
+[networks.testnet]
+api.v3 = "https://testnet.toncenter.com/api/v3"

@@ -1,75 +1,72 @@
-/**
- * Journal — NDJSON append-only store for SignalEnvelope stream.
- * Mirrors the `decision_journal` concept from ton-agent. Thread-safe for a
- * single writer process (node fs append is atomic for small writes).
- */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto"
+import fs from "node:fs"
+import path from "node:path"
 
-export interface JournalOptions {
-  /** Rotate to `<file>.1` once size exceeds this (bytes). Default 16MB. */
-  maxBytes?: number;
-}
+const JOURNAL_DIR = process.env.JOURNAL_DIR || process.env.DATA_DIR || "./data"
 
 export class Journal {
-  readonly filePath: string;
-  private readonly maxBytes: number;
-  private lineCount = 0;
+  private file: string
+  private maxBytes: number | null
 
-  constructor(filePath: string, opts: JournalOptions = {}) {
-    this.filePath = filePath;
-    this.maxBytes = opts.maxBytes ?? 16 * 1024 * 1024;
-    if (!existsSync(filePath)) {
-      mkdirSync(dirname(filePath), { recursive: true });
-      appendFileSync(filePath, "", { flag: "a" });
+  constructor(fileOrDir?: string, opts?: { maxBytes?: number }) {
+    const input = fileOrDir ?? "";
+    if (input.includes(path.sep) || input.endsWith(".ndjson")) {
+      this.file = input
+      fs.mkdirSync(path.dirname(this.file), { recursive: true })
+    } else {
+      this.file = path.join(JOURNAL_DIR, input)
+      fs.mkdirSync(path.dirname(this.file), { recursive: true })
     }
-    this.lineCount = this.countLines(filePath);
+    this.maxBytes = typeof opts?.maxBytes === "number" ? opts.maxBytes : null
   }
 
-  private countLines(p: string): number {
-    try {
-      return readFileSync(p, "utf8").split("\n").filter((l) => l.trim().length > 0).length;
-    } catch {
-      return 0;
-    }
-  }
-
-  append(value: unknown): void {
-    const line = JSON.stringify(value);
-    if (line === undefined) throw new Error("journal: value is not JSON-serializable");
-    appendFileSync(this.filePath, line + "\n", { flag: "a" });
-    this.lineCount++;
-    this.maybeRotate();
-  }
-
-  private maybeRotate(): void {
-    let size = 0;
-    try {
-      size = statSync(this.filePath).size;
-    } catch {
-      return;
-    }
-    if (size > this.maxBytes) {
-      renameSync(this.filePath, `${this.filePath}.1`);
-      appendFileSync(this.filePath, "", { flag: "a" });
-      this.lineCount = 0;
-    }
+  get filePath() {
+    return this.file
   }
 
   get lineCountValue(): number {
-    return this.lineCount;
+    if (!fs.existsSync(this.file)) return 0
+    const data = fs.readFileSync(this.file, "utf8")
+    return data.split("\n").filter(Boolean).length
+  }
+
+  append(event: Record<string, unknown> | string) {
+    const payload = typeof event === "string" ? event : JSON.stringify(event)
+    if (this.maxBytes !== null && fs.existsSync(this.file)) {
+      const stat = fs.statSync(this.file)
+      if (stat.size >= this.maxBytes) {
+        const rotated = `${this.file}.1`
+        if (fs.existsSync(rotated)) fs.rmSync(rotated)
+        fs.renameSync(this.file, rotated)
+      }
+    }
+    fs.appendFileSync(this.file, payload + "\n", "utf8")
+  }
+
+  tail(max = 200): Record<string, unknown>[] {
+    if (!fs.existsSync(this.file)) return []
+    const data = fs.readFileSync(this.file, "utf8")
+    const lines = data.split("\n").filter(Boolean).slice(-max)
+    return lines.map((l) => JSON.parse(l))
   }
 }
 
-/** Read an NDJSON journal into an array (for tests, replay, backtest input). */
-export function readJournal(filePath: string): unknown[] {
-  if (!existsSync(filePath)) return [];
-  return readFileSync(filePath, "utf8")
-    .split("\n")
-    .filter((l) => l.trim().length > 0)
-    .map((l) => JSON.parse(l));
+export function readJournal(file: string, max = 200): Record<string, unknown>[] {
+  if (!fs.existsSync(file)) return []
+  const data = fs.readFileSync(file, "utf8")
+  const lines = data.split("\n").filter(Boolean).slice(-max)
+  return lines.map((l) => JSON.parse(l))
 }
 
-export function journalPath(dir: string, network: string): string {
-  return join(dir, `signals-${network}.ndjson`);
+export function journalPath(name: string, dir = JOURNAL_DIR): string {
+  if (dir && dir !== "./data" && !dir.includes(path.sep)) {
+    return path.join(name, `signals-${dir}.ndjson`)
+  }
+  return path.join(dir, name)
 }
+
+export function journalEventId(): string {
+  return randomUUID()
+}
+
+export type JournalOptions = { dir?: string; maxBytes?: number }

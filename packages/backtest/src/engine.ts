@@ -108,7 +108,12 @@ export function runBacktest(opts: RunBacktestOptions): BacktestResult {
     const gate = evaluateGates(env, {
       now: event.ts,
       cooldowns,
-      openPositions: [...open.values()].map((o) => ({ address: o.pos.tokenAddress, pnlPct: null })),
+      openPositions: [...open.values()].map((o) => ({ 
+        address: o.pos.tokenAddress, 
+        pnlPct: null,
+        sizeTon: o.pos.amountTon,
+        sector: undefined
+      })),
       // Equity-based drawdown — same measure computeMetrics uses (bankroll is
       // the starting equity). The gate's 20% circuit breaker must fire here or
       // the backtest trades the account into the ground while reporting 0%.
@@ -144,6 +149,10 @@ export function runBacktest(opts: RunBacktestOptions): BacktestResult {
       mode,
       feesTon: fees,
       timeStopMs,
+      atrAtEntry: setup.volPct,
+      swingLow: setup.stopLoss,
+      swingHigh: setup.takeProfit,
+      ladderExits: [],
     });
 
     let exitTon = entryBar.priceTon;

@@ -1,0 +1,23 @@
+{
+  "name": "@openclaw-ton-agent/agents",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "tsx --test src/*.test.ts"
+  },
+  "dependencies": {
+    "@openclaw-ton-agent/shared": "*",
+    "@openclaw-ton-agent/core": "*",
+    "zod": "^3.23.8",
+    "ioredis": "^5.4.1"
+  },
+  "devDependencies": {
+    "@types/ioredis": "^5.0.0"
+  }
+}

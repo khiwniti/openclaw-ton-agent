@@ -7,11 +7,14 @@
   "types": "src/index.ts",
   "scripts": {
     "test": "tsx --test src/*.test.ts",
-    "start": "tsx src/index.ts"
+    "start": "tsx src/index.ts",
+    "continuous": "tsx src/continuous.ts"
   },
   "dependencies": {
     "@openclaw-ton-agent/risk-gates": "*",
     "@openclaw-ton-agent/shared": "*",
+    "@ton/ton": "^15.1.0",
+    "@ton/crypto": "^3.3.0",
     "dotenv": "^16.4.5"
   }
 }

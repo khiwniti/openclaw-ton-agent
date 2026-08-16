@@ -13,7 +13,7 @@ import { Journal } from "@openclaw-ton-agent/shared";
 import { EXEC_CONFIG } from "./config";
 import { buildOrderRequest } from "./order-builder";
 import { Executor } from "./modes";
-import { PaperWallet, TonMcpWallet } from "./wallet";
+import { PaperWallet, TonMcpWallet, ActonWallet } from "./wallet.js";
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(name);
@@ -22,6 +22,14 @@ function arg(name: string): string | undefined {
 
 export function walletForMode(mode: ExecutionMode) {
   if (mode !== "auto") return new PaperWallet();
+  if (EXEC_CONFIG.acton.enabled) {
+    return new ActonWallet({
+      mode: "auto",
+      gatesG1G3Ack: EXEC_CONFIG.gatesG1G3Ack,
+      network: EXEC_CONFIG.network,
+      cwd: EXEC_CONFIG.acton.projectPath,
+    });
+  }
   return new TonMcpWallet({ mode: "auto", gatesG1G3Ack: EXEC_CONFIG.gatesG1G3Ack, network: EXEC_CONFIG.network });
 }
 
