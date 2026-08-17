@@ -30,6 +30,7 @@ export class MarketScannerAgent extends BaseAgent {
 
   async publishSignal(signal: SignalEnvelope) {
     await this.emit("signal.published", "risk-gate", signal)
-    this.journal.append("signals.ndjson", signal)
+    this.journal.append(signal as unknown as Record<string, unknown>)
   }
+
 }

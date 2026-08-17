@@ -20,8 +20,20 @@ export async function runContinuousRiskGates(opts: {
   const cooldowns = new Map<string, number>();
   let lastProcessedLine = 0;
 
+  const existingGated = fs.existsSync(opts.gatedPath) ? readJournal(opts.gatedPath) : [];
+  const processedSignalIds = new Set<string>();
+  for (const g of existingGated) {
+    if (g && typeof g === "object" && "id" in g && typeof (g as { id: string }).id === "string") {
+      processedSignalIds.add((g as { id: string }).id);
+    }
+  }
+
   const gatedJournal = new Journal(opts.gatedPath);
-  log.info("continuous risk-gates started", { signals: opts.signalsPath, gated: opts.gatedPath });
+  log.info("continuous risk-gates started", {
+    signals: opts.signalsPath,
+    gated: opts.gatedPath,
+    existingGatedCount: existingGated.length,
+  });
 
   const processNewSignals = async () => {
     try {
@@ -35,7 +47,10 @@ export async function runContinuousRiskGates(opts: {
         const parsed = validateIngested(row);
         if (!parsed.ok || !parsed.value) continue;
         const env = parsed.value;
-
+        if (env.id && processedSignalIds.has(env.id)) {
+          continue;
+        }
+        if (env.id) processedSignalIds.add(env.id);
         const annotated = annotateEnvelope(env, {
           curvePct: env.token.curvePct,
           sentiment: env.token.holders !== undefined ? "neutral" : "unknown",

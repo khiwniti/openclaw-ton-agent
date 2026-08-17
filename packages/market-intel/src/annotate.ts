@@ -32,7 +32,7 @@ export function annotateEnvelope(envelope: IngestedEnvelope, input: AnnotationIn
   const annotation: Annotation = {
     regime: input.regime?.regime ?? "unknown",
     regimeConfidence: input.regime?.confidence ?? null,
-    curveBand: curveBand(input.curvePct ?? envelope.token.curvePct),
+    curveBand: curveBand(input.curvePct ?? envelope.token.curvePct ?? null),
     whale: input.whale?.signal ?? null,
     whaleDeltaPct: input.whale?.deltaPct ?? null,
     sentiment: input.sentiment ?? "unknown",

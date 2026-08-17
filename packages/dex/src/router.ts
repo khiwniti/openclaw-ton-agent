@@ -1,6 +1,12 @@
-import type { Address } from "@ton/ton";
+import {
+  getSwapQuote as _getSwapQuote,
+  executeSwap as _executeSwap,
+  type Dex,
+  type SwapResult as ActonSwapResult,
+} from "@openclaw-ton-agent/executor";
 
-export type Dex = "stonfi" | "dedust";
+
+export { Dex };
 
 export interface SwapRequest {
   side: "buy" | "sell";
@@ -16,16 +22,75 @@ export interface SwapResult {
   error?: string;
 }
 
-export async function getSwapQuote(_client: unknown, route: { dex: Dex; poolAddress: string }, side: "buy" | "sell", amountInNano: string, jettonMaster: string): Promise<{ expectedOutNano: bigint; available: boolean } | null> {
-  const expectedOutNano = BigInt(amountInNano) / 2n;
-  return { expectedOutNano, available: true };
+/**
+ * Get a swap quote for the given route and side.
+ * Delegates to the acton router which calls Ston.fi / DeDust on-chain.
+ * Returns null if the pool is dead-cached or the RPC call fails.
+ */
+export async function getSwapQuote(
+  client: unknown,
+  route: { dex: Dex; poolAddress: string },
+  side: "buy" | "sell",
+  amountInNano: string,
+  jettonMaster: string,
+  network = "mainnet"
+): Promise<{ expectedOutNano: bigint; available: boolean } | null> {
+  const quote = await _getSwapQuote(
+    client as any,
+    route,
+    side,
+    amountInNano,
+    jettonMaster,
+    network
+  );
+  if (!quote) return null;
+  return {
+    expectedOutNano: BigInt(quote.expectedOutNano),
+    available: quote.available,
+  };
 }
 
+/**
+ * Compute the minimum acceptable output given expected output and a slippage ceiling in bps.
+ */
 export function computeMinOut(expectedOutNano: bigint, ceilingBps: number): string {
-  const keep = (expectedOutNano * BigInt(10000 - ceilingBps)) / 10000n;
+  const roundedBps = Math.round(ceilingBps);
+  const keep = (expectedOutNano * BigInt(10_000 - roundedBps)) / 10_000n;
   return keep.toString();
 }
 
-export async function executeSwap(_client: unknown, req: SwapRequest, _dex: Dex): Promise<SwapResult> {
-  return { ok: true, txHash: "simulated_tx", amountTokens: 0 };
+/**
+ * Execute a swap against the given DEX.
+ * In notify_only/paper mode this should not be called — use PaperWallet instead.
+ * In auto mode, delegates to the acton router.
+ */
+export async function executeSwap(
+  client: unknown,
+  req: SwapRequest,
+  dex: Dex,
+  network = "mainnet",
+  tier: "low" | "mid" | "high" = "low",
+  wallet?: { address: string; getBalance?: () => Promise<bigint> }
+): Promise<SwapResult> {
+  const result: ActonSwapResult = await _executeSwap(
+    client as any,
+    {
+      jettonMaster: req.jettonMaster,
+      amountTon: req.amountTon,
+      side: req.side,
+      minOutJettonNano: req.minOutJettonNano,
+    },
+    tier,
+    dex,
+    network as any,
+    wallet
+  );
+  return {
+    ok: result.ok,
+    txHash: result.txHash,
+    amountTokens: result.amountTokens ? Number(result.amountTokens) : undefined,
+    error: result.error,
+  };
 }
+
+

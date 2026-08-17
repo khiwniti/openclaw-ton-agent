@@ -79,44 +79,10 @@ RUN apk add --no-cache dumb-init
 RUN addgroup -g 1001 -S appgroup && \
     adduser -u 1001 -S appuser -G appgroup
 
-# Copy package files
-COPY package.json package-lock.json ./
-COPY packages/agents/package.json packages/agents/
-COPY packages/api/package.json packages/api/
-COPY packages/backtest/package.json packages/backtest/
-COPY packages/core/package.json packages/core/
-COPY packages/dex/package.json packages/dex/
-COPY packages/executor/package.json packages/executor/
-COPY packages/exit-manager/package.json packages/exit-manager/
-COPY packages/market-intel/package.json packages/market-intel/
-COPY packages/orchestration/package.json packages/orchestration/
-COPY packages/risk-gates/package.json packages/risk-gates/
-COPY packages/scanner/package.json packages/scanner/
-COPY packages/security/package.json packages/security/
-COPY packages/shared/package.json packages/shared/
-COPY packages/storage/package.json packages/storage/
-COPY packages/wallet/package.json packages/wallet/
-
-# Install ALL dependencies (tsx is a devDependency needed at runtime)
-RUN npm ci --ignore-scripts && npm cache clean --force
-
-# Copy built source from builder
-COPY --from=builder /app/node_modules/better-sqlite3 node_modules/better-sqlite3
-COPY --from=builder /app/packages/agents packages/agents
-COPY --from=builder /app/packages/api packages/api
-COPY --from=builder /app/packages/backtest packages/backtest
-COPY --from=builder /app/packages/core packages/core
-COPY --from=builder /app/packages/dex packages/dex
-COPY --from=builder /app/packages/executor packages/executor
-COPY --from=builder /app/packages/exit-manager packages/exit-manager
-COPY --from=builder /app/packages/market-intel packages/market-intel
-COPY --from=builder /app/packages/orchestration packages/orchestration
-COPY --from=builder /app/packages/risk-gates packages/risk-gates
-COPY --from=builder /app/packages/scanner packages/scanner
-COPY --from=builder /app/packages/security packages/security
-COPY --from=builder /app/packages/shared packages/shared
-COPY --from=builder /app/packages/storage packages/storage
-COPY --from=builder /app/packages/wallet packages/wallet
+# Copy dependencies, compiled packages, and configuration from builder
+COPY --from=builder /app/package.json /app/package-lock.json /app/tsconfig.json ./
+COPY --from=builder /app/node_modules node_modules
+COPY --from=builder /app/packages packages
 COPY --from=builder /app/openclaw openclaw
 COPY --from=builder /app/scripts scripts
 

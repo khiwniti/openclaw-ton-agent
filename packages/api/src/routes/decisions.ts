@@ -1,15 +1,24 @@
 import type { FastifyPluginAsync } from "fastify"
-import { Journal, journalPath } from "@openclaw-ton-agent/shared"
+import { Journal } from "@openclaw-ton-agent/shared"
 import { store } from "@openclaw-ton-agent/storage"
-
-const JOURNAL_STREAM = "decisions.ndjson"
+import * as path from "node:path"
 
 const decisionsRoutes: FastifyPluginAsync = async (app) => {
-  const journal = new Journal(JOURNAL_STREAM)
+  const dataDir = process.env.DATA_DIR || process.env.JOURNAL_DIR || "./data"
+  const network = process.env.TON_NETWORK || "testnet"
+  const journal = new Journal(path.join(dataDir, "decisions.ndjson"))
+  const ordersJournal = new Journal(path.join(dataDir, `orders-${network}.ndjson`))
+  const fillsJournal = new Journal(path.join(dataDir, `fills-${network}.ndjson`))
+  const gatedJournal = new Journal(path.join(dataDir, `gated-${network}.ndjson`))
+  const signalsJournal = new Journal(path.join(dataDir, `signals-${network}.ndjson`))
 
   app.get("/", async () => ({ count: journal.tail().length }))
-
   app.get("/recent", async () => ({ items: journal.tail(100).reverse() }))
+
+  app.get("/orders", async () => ({ count: ordersJournal.tail().length, items: ordersJournal.tail(50).reverse() }))
+  app.get("/fills", async () => ({ count: fillsJournal.tail().length, items: fillsJournal.tail(50).reverse() }))
+  app.get("/gated", async () => ({ count: gatedJournal.tail().length, items: gatedJournal.tail(50).reverse() }))
+  app.get("/signals", async () => ({ count: signalsJournal.tail().length, items: signalsJournal.tail(50).reverse() }))
 
   app.post("/", async (req, reply) => {
     try {

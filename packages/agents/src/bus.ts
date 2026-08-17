@@ -23,7 +23,9 @@ export class AgentBus {
 
   async send(message: AgentMessage) {
     const channel = message.to === "broadcast" ? "agents.broadcast" : `agents.direct.${message.to}`
-    this.journal.append("bus.ndjson", message)
+    this.journal.append(message as unknown as Record<string, unknown>)
+
+
     if (this.redis) {
       await this.redis.publish(channel, JSON.stringify(message))
     }

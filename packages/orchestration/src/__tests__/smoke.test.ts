@@ -1,19 +1,23 @@
 import { describe, it } from "node:test"
-import { runDemoCycle } from "../index.js"
+import { runCycle } from "../index.js"
 
 describe("orchestration smoke", () => {
-  it("runs demo cycle end-to-end", async () => {
-    const discarded = false
-    const original = console.log
+  it("runs a cycle end-to-end (observe-only, no live keys required)", async () => {
+    const original = process.stdout.write.bind(process.stdout)
     const logs: string[] = []
-    console.log = (...args: unknown[]) => { logs.push(args.join(" ")) }
-    try {
-      await runDemoCycle()
-    } catch {
-      // demo logs only; tolerate runtime artifacts
-    } finally {
-      console.log = original
+    // Silence logger output during test
+    process.stdout.write = (chunk: any) => {
+      if (typeof chunk === "string") logs.push(chunk)
+      return true
     }
-    
+
+    try {
+      await runCycle({ tier: "low" })
+    } catch {
+      // No wallet keys in CI — tolerate RPC/config failures
+    } finally {
+      process.stdout.write = original
+    }
   })
 })
+

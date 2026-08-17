@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "skills": {
+    "deepwiki": {
+      "source": "seflless/deepwiki",
+      "sourceType": "github",
+      "skillPath": "skills/deepwiki/SKILL.md",
+      "computedHash": "836ccb7598f0b44a8b1b7414134d5abf4333556a8474d30a8fcae00040491274"
+    },
+    "ton-balance": {
+      "source": "ton-org/skills",
+      "sourceType": "github",
+      "skillPath": "wallets/ton-balance/SKILL.md",
+      "computedHash": "13fa0dde9186d283f9e12a388596f15b5d8bd9f9edf9e899ccd864d237ee6ae9"
+    },
+    "ton-cli": {
+      "source": "ton-org/skills",
+      "sourceType": "github",
+      "skillPath": "wallets/ton-cli/SKILL.md",
+      "computedHash": "d781460c8c17dcbd282dbdc74f4156335aba0b1bbbcd78036d347397db5cdeaa"
+    },
+    "ton-create-wallet": {
+      "source": "ton-org/skills",
+      "sourceType": "github",
+      "skillPath": "wallets/ton-create-wallet/SKILL.md",
+      "computedHash": "2215b3b2918d76f0dd76d033b369e8693ae2436b615768f4482d76c051af35e8"
+    },
+    "ton-docs": {
+      "source": "ton-org/skills",
+      "sourceType": "github",
+      "skillPath": "docs/ton-docs/SKILL.md",
+      "computedHash": "6edc82d540bef4ad530846eeed8482951e985b981238e6a99fca12e67d533528"
+    },
+    "ton-manage-wallets": {
+      "source": "ton-org/skills",
+      "sourceType": "github",
+      "skillPath": "wallets/ton-manage-wallets/SKILL.md",
+      "computedHash": "6fba211ef9e21c5561cee4fed107c28af57122213da678dd7bb09e2a5f5f4470"
+    },
+    "ton-nfts": {
+      "source": "ton-org/skills",
+      "sourceType": "github",
+      "skillPath": "wallets/ton-nfts/SKILL.md",
+      "computedHash": "700e16688d68506853ab5844d82ed8adc685002d3ee2c26c7f55cb591d4d3686"
+    },
+    "ton-send": {
+      "source": "ton-org/skills",
+      "sourceType": "github",
+      "skillPath": "wallets/ton-send/SKILL.md",
+      "computedHash": "7d9b9641d30fb0d7dcceb19a3d274d5d2f5ebd1176897786e4b5eaf957ab0de5"
+    },
+    "ton-swap": {
+      "source": "ton-org/skills",
+      "sourceType": "github",
+      "skillPath": "wallets/ton-swap/SKILL.md",
+      "computedHash": "61b2cb4f23c2098b3de9e76035e2c765f31f9dcc14d5e614c004dfa9d0654d51"
+    },
+    "ton-xstocks": {
+      "source": "ton-org/skills",
+      "sourceType": "github",
+      "skillPath": "wallets/ton-xstocks/SKILL.md",
+      "computedHash": "f065cab27515ae752585640cab8d69ac3634759352a044d69dcc3005479dbac0"
+    }
+  }
+}

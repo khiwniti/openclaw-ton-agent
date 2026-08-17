@@ -5,10 +5,12 @@
  * 
  * Based on the sniper_exit_policy.py from the intelligent SL/TP research.
  */
-import { TonClient, Address, toNano } from "@ton/ton";
-import { PreTradeGate, SafetyConfig, PoolDepth, SafetyCheckResult } from "@openclaw-ton-agent/risk-gates";
-import { chandelierStop, supertrendFlip, structureStopLoss, stepPosition } from "@openclaw-ton-agent/exit-manager";
-import type { Position, StepResult, ExitAction, ExitMode } from "@openclaw-ton-agent/exit-manager";
+import { TonClient } from "@ton/ton";
+import { PreTradeGate } from "./safety-gate.js";
+import { stepPosition } from "@openclaw-ton-agent/exit-manager";
+import type { Position, ExitAction, ExitMode } from "@openclaw-ton-agent/exit-manager";
+
+
 
 export interface DexClient {
   /** Simulate a swap and return expected output. */
@@ -203,9 +205,9 @@ export class SniperEngine {
       return {
         success: false,
         error: error instanceof Error ? error.message : String(error),
-        exitAction: "error",
       };
     }
+
   }
 
   /**

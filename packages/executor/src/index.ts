@@ -15,6 +15,10 @@ import { buildOrderRequest } from "./order-builder";
 import { Executor } from "./modes";
 import { PaperWallet, TonMcpWallet, ActonWallet } from "./wallet.js";
 
+export { EXEC_CONFIG, buildOrderRequest, Executor, PaperWallet, TonMcpWallet, ActonWallet };
+export * from "./acton/router.js";
+
+
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : undefined;

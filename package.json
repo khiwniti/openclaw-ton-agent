@@ -34,6 +34,6 @@
     "concurrently": "^9.1.0",
     "json5": "^2.2.3",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.9.3"
   }
 }

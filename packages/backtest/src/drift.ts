@@ -77,8 +77,8 @@ export function runDriftMonitor(opts: DriftOptions): DriftResult {
 
   const fills: DriftFill[] = [];
   for (const row of fillRows) {
-    if (typeof row !== "object" || row === null) continue;
-    const f = row as PaperFillRecord;
+    const f = row as unknown as PaperFillRecord;
+
     if (typeof f.orderId !== "string") continue;
     const order = orders.get(f.orderId);
     if (!order) continue; // fill without a matching order: unmeasurable, skip

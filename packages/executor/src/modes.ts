@@ -100,11 +100,12 @@ export class Executor {
     }
 
     // auto — live. The wallet adapter itself enforces G1–G3 ack + confirm.
-    const liveWallet = this.opts.wallet ?? new TonMcpWallet({ mode: "auto", gatesG1G3Ack: false, network: "mainnet" });
+    const liveWallet = this.wallet;
     const fill = await liveWallet.swap(order);
     this.opts.ordersJournal.append(order);
     this.opts.fillsJournal.append({ orderId: order.id, ...fill });
     return { order, action: "executed", fill, journaled: true };
+
   }
 
   private async runRequoteGuard(order: OrderRequest): Promise<{ pass: boolean; driftBps: number; reason: string; updatedOrder?: OrderRequest }> {

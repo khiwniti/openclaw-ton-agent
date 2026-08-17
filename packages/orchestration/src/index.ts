@@ -1,18 +1,34 @@
 import { buildGramSupervisorGraph } from "./graph.js"
-import { executionNode, makeAuthorizedExecution } from "./nodes/execution.js"
+import { logger } from "@openclaw-ton-agent/core"
 
 
+/**
+ * Run one orchestration cycle. The seed jetton master is read from the
+ * environment (SEED_JETTON_MASTER) or left undefined so the market scanner
+ * node performs a live scan via TonAPI.
+ */
+export async function runCycle(opts?: {
+  seedJettonMaster?: string
+  tier?: "low" | "mid" | "high"
+}) {
+  const tier = opts?.tier ?? "low"
+  const seedJettonMaster = opts?.seedJettonMaster ?? process.env.SEED_JETTON_MASTER
 
-export async function runDemoCycle() {
   const graph = buildGramSupervisorGraph(() => ({
     killSwitchActive: false,
     dailyLossBreached: false,
-    tier: { balanceTon: 10, openPositions: 0, maxOpen: 3, maxPositionTon: 5 },
+    tier: {
+      balanceTon: Number(process.env.TIER_BALANCE_TON ?? 10),
+      openPositions: 0,
+      maxOpen: Number(process.env.MAX_OPEN_POSITIONS_PER_TIER ?? 3),
+      maxPositionTon: Number(process.env.MAX_POSITION_TON ?? 5),
+    },
   }))
+
   const state = await graph.run({
     cycle_id: `cycle-${Date.now()}`,
-    tier: "low",
-    seed_jetton_master: "EQ-placeholder-jetton-master",
+    tier,
+    seed_jetton_master: seedJettonMaster,
     candidate: undefined,
     risk_assessment: undefined,
     proposed_ticket: undefined,
@@ -24,12 +40,20 @@ export async function runDemoCycle() {
     todo_plan: [],
     journal_ref: undefined,
   })
-  console.info("GRAPH", JSON.stringify({ discarded: state.discarded, reason: state.discard_reason }))
+
+  logger.info("ORCHESTRATION", JSON.stringify({
+    discarded: state.discarded,
+    reason: state.discard_reason,
+    txHash: state.execution_result?.txHash,
+  }))
+
+  return state
 }
 
 if (process.argv[1] && process.argv[1].includes("index.ts")) {
-  runDemoCycle().catch((err) => {
-    console.error(err)
+  runCycle().catch((err) => {
+    logger.err("ORCHESTRATION", `fatal: ${(err as Error)?.message ?? err}`)
     process.exit(1)
   })
 }
+

@@ -179,7 +179,7 @@ export function evaluateGates(envelope: IngestedEnvelope, ctx: GateContext): Gat
     return base;
   }
 
-  const winProb = ctx.winProbOverride ?? Math.min(1, soft / 100);
+  const winProb = ctx.winProbOverride ?? (soft > 0 ? Math.min(1, soft / 100) : (GATE_CONFIG.tradeFloorScore === 0 ? 0.5 : 0));
   if (winProb < GATE_CONFIG.minWinProbability) {
     reasons.push(`win probability ${(winProb * 100).toFixed(1)}% < floor ${GATE_CONFIG.minWinProbability * 100}%`);
     return base;

@@ -17,7 +17,12 @@ import { runScanTick } from "./pipeline";
 import { SeenCache } from "./seen";
 import { createStats, startHealthServer } from "./health";
 
+export { tonapiSource, replaySource };
+export type { ScannerSource, JettonView } from "./replay";
+export { SCANNER_CONFIG } from "./config";
+
 const log = createLogger("scanner");
+
 
 function pickSource() {
   const requested = process.env.SCANNER_SOURCE;

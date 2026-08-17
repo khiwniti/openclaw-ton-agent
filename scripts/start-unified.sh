@@ -9,7 +9,7 @@ echo "[STARTUP] Starting unified scanner + executor container"
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Ensure data directory exists
-export DATA_DIR=${DATA_DIR:-/app/data}
+export DATA_DIR=${DATA_DIR:-$APP_DIR/data}
 export JOURNAL_DIR=${JOURNAL_DIR:-$DATA_DIR}
 export GATED_DIR=${GATED_DIR:-$DATA_DIR}
 export SQLITE_PATH=${SQLITE_PATH:-$DATA_DIR/agent.db}

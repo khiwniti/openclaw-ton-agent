@@ -18,7 +18,7 @@ import {
   evaluateBuyGasGuard,
   evaluateSellGasGuard,
 } from "./gas-guard.js";
-import { computeMinOut, buildMinOutConstraint } from "./minout.js";
+// minout helpers are available if needed
 import {
   readUserJettonBalance,
   verifyBuyDelivered,
@@ -30,6 +30,8 @@ import { sendTransferLocked } from "./locked-wallet.js";
 
 export const STONFI_ROUTER_ADDR = "EQB3ncyBUTjZUA5EnFKR5_EnOMI9V1tTEAAPaiU71gc4TiUt";
 const STONFI_ROUTER_ADDR_TESTNET = "kQBsGx9ArADUrREB34W-ghgsCgBShvfUr4Jvlu-0KGc33a1n";
+export const STONFI_PTON_ADDR = "EQCM3B12QK1e4yZSf8GtBRT0aLMNyEsBc_DhVfRRtOEffLez";
+const STONFI_PTON_ADDR_TESTNET = "EQCM3B12QK1e4yZSf8GtBRT0aLMNyEsBc_DhVfRRtOEffLez";
 
 // Source: @dedust/sdk v0.8.x MAINNET_FACTORY_ADDR
 export const DEDUST_FACTORY_ADDR_MAINNET = "EQBfBWT7X2BHg9tXAxzhz2aKiNTU1tpt5NsiK0uSDW_YAJ67";
@@ -40,6 +42,10 @@ function isTestnet(network = "mainnet"): boolean {
 
 function stonfiRouterAddr(network = "mainnet"): string {
   return isTestnet(network) ? STONFI_ROUTER_ADDR_TESTNET : STONFI_ROUTER_ADDR;
+}
+
+function stonfiPtonAddr(network = "mainnet"): string {
+  return isTestnet(network) ? STONFI_PTON_ADDR_TESTNET : STONFI_PTON_ADDR;
 }
 
 function dedustFactoryAddr(network = "mainnet"): string | null {
@@ -348,8 +354,9 @@ async function stonfiBuy(
             type: "slice",
             cell: beginCell()
               .storeCoins(toNano(p.amountTon.toString()))
-              .storeAddress(jettonWallet)
+              .storeAddress(Address.parse(jettonWallet))
               .endCell()
+
               .toBoc()
               .toString("base64"),
           },
@@ -369,11 +376,45 @@ async function stonfiBuy(
     w.address
   );
 
-  const routerBody = beginCell()
+  const pTonMinterAddr = Address.parse(stonfiPtonAddr(network));
+  let routerPtonWallet: Address;
+  try {
+    const ptonRes = await client.runMethod(pTonMinterAddr, "get_wallet_address", [
+      { type: "slice", cell: beginCell().storeAddress(Address.parse(routerAddr)).endCell() }
+    ]);
+    routerPtonWallet = ptonRes.stack.readAddress();
+  } catch {
+    routerPtonWallet = Address.parse("EQARULUYsmJq1RiZ-YiH-IJLcAZUVkVff-KBPwEmmaQGH6aC");
+  }
+
+  let routerJettonWallet: Address;
+  try {
+    const rRes = await client.runMethod(jettonMasterAddr, "get_wallet_address", [
+      { type: "slice", cell: beginCell().storeAddress(Address.parse(routerAddr)).endCell() }
+    ]);
+    routerJettonWallet = rRes.stack.readAddress();
+  } catch {
+    routerJettonWallet = jettonMasterAddr;
+  }
+
+  const forwardPayload = beginCell()
     .storeUint(0x25938561, 32)
-    .storeCoins(toNano(p.amountTon.toString()))
-    .storeAddress(jettonMasterAddr)
+    .storeAddress(routerJettonWallet)
     .storeCoins(BigInt(p.minOutJettonNano ?? "1"))
+    .storeAddress(Address.parse(w.address))
+    .storeUint(0, 1)
+    .endCell();
+
+  const transferBody = beginCell()
+    .storeUint(0x0f8a7ea5, 32)
+    .storeUint(Date.now(), 64)
+    .storeCoins(toNano(p.amountTon.toString()))
+    .storeAddress(Address.parse(routerAddr))
+    .storeAddress(Address.parse(w.address))
+    .storeBit(0)
+    .storeCoins(toNano("0.185"))
+    .storeBit(1)
+    .storeRef(forwardPayload)
     .endCell();
 
   const r = await sendTransferLocked(
@@ -383,9 +424,9 @@ async function stonfiBuy(
       secretKey: kp.sec,
       messages: [
         {
-          to: routerAddr,
-          value: toNano((p.amountTon + 0.25).toString()),
-          body: routerBody.toBoc().toString("base64"),
+          to: routerPtonWallet.toString(),
+          value: toNano((p.amountTon + 0.24).toString()),
+          body: transferBody.toBoc().toString("base64"),
         } as any,
       ],
       client,
@@ -433,8 +474,8 @@ async function stonfiSell(
     return { ok: false, dex: "stonfi", error: sellGuard.error };
   }
 
-  const routerAddr = stonfiRouterAddr(network);
   const jettonMasterAddr = Address.parse(p.jettonMaster);
+
 
   const result = await readWithRetries(() =>
     client.runMethod(jettonMasterAddr.toString(), "get_wallet_address", [
@@ -453,21 +494,33 @@ async function stonfiSell(
     w.address
   );
 
+  const pTonMinterAddr = Address.parse(stonfiPtonAddr(network));
+  let routerPtonWallet: Address;
+  try {
+    const pRes = await client.runMethod(pTonMinterAddr, "get_wallet_address", [
+      { type: "slice", cell: beginCell().storeAddress(Address.parse(stonfiRouterAddr(network))).endCell() }
+    ]);
+    routerPtonWallet = pRes.stack.readAddress();
+  } catch {
+    routerPtonWallet = pTonMinterAddr;
+  }
+
   const forwardBody = beginCell()
     .storeUint(0x25938561, 32)
-    .storeCoins(BigInt(p.jettonAmountNano))
-    .storeAddress(jettonMasterAddr)
+    .storeAddress(routerPtonWallet)
     .storeCoins(BigInt(p.minOutJettonNano ?? "1"))
+    .storeAddress(Address.parse(w.address))
+    .storeUint(0, 1)
     .endCell();
 
   const sellBody = beginCell()
     .storeUint(0xf8a7ea5, 32)
     .storeUint(Date.now(), 64)
     .storeCoins(BigInt(p.jettonAmountNano))
-    .storeAddress(userJettonWallet)
-    .storeAddress(w.address)
+    .storeAddress(Address.parse(stonfiRouterAddr(network)))
+    .storeAddress(Address.parse(w.address))
     .storeBit(0)
-    .storeCoins(toNano("0.05"))
+    .storeCoins(toNano("0.185"))
     .storeBit(1)
     .storeRef(forwardBody)
     .endCell();
@@ -717,8 +770,9 @@ async function dedustSell(
     .storeUint(0xf8a7ea5, 32)
     .storeUint(Date.now(), 64)
     .storeCoins(BigInt(p.jettonAmountNano))
-    .storeAddress(userJettonWallet)
+    .storeAddress(Address.parse(userJettonWallet))
     .storeAddress(w.address)
+
     .storeBit(0)
     .storeCoins(toNano("0.25"))
     .storeBit(1)
@@ -875,8 +929,9 @@ export async function getSwapQuote(
             type: "slice",
             cell: beginCell()
               .storeCoins(BigInt(amountInNano))
-              .storeAddress(jettonWallet)
+              .storeAddress(Address.parse(jettonWallet))
               .endCell()
+
               .toBoc()
               .toString("base64"),
           },

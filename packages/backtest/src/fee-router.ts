@@ -4,7 +4,8 @@
  * before committing to a trade size. This prevents "looks fine at 0.1 TON,
  * brutal slippage at 50 TON" scenarios.
  */
-import { fetch, Headers } from "undici";
+import { logger } from "@openclaw-ton-agent/core";
+
 
 export interface STONFiSimulateRequest {
   offerAmount: string;        // in nanoTON (1e9)
@@ -96,7 +97,6 @@ export async function probeStonFiMultiSize(
 
   const probes: SlippageProbeResult[] = [];
   let lastValidSize = 0;
-  const recommendedSize = 0;
 
   for (const mult of multipliers) {
     const sizeTon = baseSize * mult;
@@ -114,14 +114,14 @@ export async function probeStonFiMultiSize(
       });
 
       if (!response.ok) {
-        console.warn(`STON.fi simulate failed for ${sizeTon} TON: HTTP ${response.status}`);
+        logger.warn("FEE_ROUTER", `STON.fi simulate failed for ${sizeTon} TON: HTTP ${response.status}`);
         continue;
       }
 
       const data = await response.json() as STONFiSimulateResponse;
       
       if (!data.success || !data.askAmount) {
-        console.warn(`STON.fi simulate returned error for ${sizeTon} TON`);
+        logger.warn("FEE_ROUTER", `STON.fi simulate returned error for ${sizeTon} TON`);
         continue;
       }
 
@@ -158,12 +158,12 @@ export async function probeStonFiMultiSize(
         break; // Stop probing larger sizes once we hit constraints
       }
     } catch (error) {
-      console.warn(`STON.fi probe failed for ${sizeTon} TON: ${error}`);
+      logger.warn("FEE_ROUTER", `STON.fi probe failed for ${sizeTon} TON: ${error}`);
     }
   }
 
   // Recommend the largest valid size, or the base size if none valid
-  recommendedSize = lastValidSize > 0 ? lastValidSize : config.baseSizeTon;
+  const recommendedSize = lastValidSize > 0 ? lastValidSize : config.baseSizeTon;
   
   const slippageCurve = probes.map(p => ({ size: p.sizeTon, impact: p.priceImpactPct }));
 
@@ -198,17 +198,12 @@ export async function probeDeDustMultiSize(
 
   const probes: SlippageProbeResult[] = [];
   let lastValidSize = 0;
-  const recommendedSize = 0;
 
-  for (const mult of config.multipliers!) {
+  for (const mult of config.multipliers ?? [1, 5, 10]) {
     const sizeTon = baseSize * mult;
     const amountInNano = Math.floor(sizeTon * 1e9);
 
     try {
-      // Query DeDust pool info first to get fee tier
-      // Note: DeDust v2 SDK would be used in production
-      const _poolInfo = await fetchDeDustPoolInfo(poolAddress);
-      
       const response = await fetch(`https://api.dedust.io/v2/pools/${poolAddress}/simulate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -219,7 +214,10 @@ export async function probeDeDustMultiSize(
         }),
       });
 
-      if (!response.ok) continue;
+      if (!response.ok) {
+        logger.warn("FEE_ROUTER", `DeDust simulate failed for ${sizeTon} TON: HTTP ${response.status}`);
+        continue;
+      }
 
       const data = await response.json() as DeDustSimulateResponse;
       const expectedOutput = Number(data.amountOut) / 1e9;
@@ -231,7 +229,7 @@ export async function probeDeDustMultiSize(
         expectedOutput,
         minOutput: expectedOutput * 0.99,
         feeBps: (feeTon / sizeTon) * 10000,
-        gasTon: 0.05, // Estimate
+        gasTon: 0.05, // DeDust doesn't report gas separately; conservative estimate
         priceImpactPct: priceImpact,
         slippageBps: priceImpact * 100,
         netOutputAfterFees: expectedOutput - feeTon / (baseSize * mult / expectedOutput),
@@ -247,7 +245,7 @@ export async function probeDeDustMultiSize(
         break;
       }
     } catch (error) {
-      console.warn(`DeDust probe failed for ${sizeTon} TON: ${error}`);
+      logger.warn("FEE_ROUTER", `DeDust probe failed for ${sizeTon} TON: ${error}`);
     }
   }
 
@@ -262,18 +260,30 @@ export async function probeDeDustMultiSize(
   };
 }
 
+/**
+ * Fetch DeDust pool metadata (fee tier, reserves) from the DeDust v2 REST API.
+ * Used to enrich probe results with pool-specific data. Fails closed — throws
+ * on non-200 rather than returning fabricated defaults.
+ */
 async function fetchDeDustPoolInfo(poolAddress: string): Promise<DeDustPoolInfo> {
-  // In production, use DeDust SDK
-  // For now, return mock
+  const response = await fetch(`https://api.dedust.io/v2/pools/${poolAddress}`, {
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`DeDust pool info fetch failed for ${poolAddress}: HTTP ${response.status}`);
+  }
+  const data = await response.json() as any;
   return {
     address: poolAddress,
-    fee: 25, // 0.25% default
-    reserve0: "0",
-    reserve1: "0",
-    token0: "",
-    token1: "",
+    fee: Number(data.fee ?? data.feeNumerator ?? 25),
+    reserve0: String(data.reserve0 ?? data.reserves?.[0] ?? "0"),
+    reserve1: String(data.reserve1 ?? data.reserves?.[1] ?? "0"),
+    token0: String(data.token0?.address ?? data.assets?.[0]?.address ?? ""),
+    token1: String(data.token1?.address ?? data.assets?.[1]?.address ?? ""),
   };
 }
+
+
 
 /**
  * Compare routes across STON.fi and DeDust at multiple sizes.

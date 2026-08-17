@@ -93,8 +93,8 @@ export function classifySeries(points: SeriesPoint[], opts: RegimeOpts = {}): Re
   // only a genuine velocity spike does.
   const window = sorted.slice(-20);
   const emaFastRecent = ema(window.map(p => p.priceTon), emaFastPeriod);
-  const emaSlowRecent = ema(window.map(p => p.priceTon), emaSlowPeriod);
   let atr = 0;
+
   if (window.length >= 3) {
     const diffs: number[] = [];
     for (let i = 1; i < window.length; i++) diffs.push(Math.abs(window[i].priceTon - window[i - 1].priceTon));

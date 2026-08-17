@@ -8,7 +8,9 @@ import { Journal, readJournal, validateIngested, createLogger, type OrderRequest
 import { EXEC_CONFIG } from "./config";
 import { buildOrderRequest } from "./order-builder";
 import { Executor } from "./modes";
-import { PaperWallet, TonMcpWallet, ActonWallet } from "./wallet.js";
+import { PaperWallet, ActonWallet } from "./wallet.js";
+
+
 import * as fs from "fs";
 import * as path from "path";
 
@@ -71,6 +73,13 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
   };
 
   const executor = new Executor({ mode, ordersJournal, fillsJournal, surface, wallet: walletForMode(mode) });
+  const existingOrders = fs.existsSync(opts.ordersOut) ? readJournal(opts.ordersOut) : [];
+  const processedEnvIds = new Set<string>();
+  for (const o of existingOrders) {
+    if (o && typeof o === "object" && "gatedEnvelopeId" in o && typeof (o as { gatedEnvelopeId: string }).gatedEnvelopeId === "string") {
+      processedEnvIds.add((o as { gatedEnvelopeId: string }).gatedEnvelopeId);
+    }
+  }
 
   // Track processed lines per file to handle continuously appending journals
   const processedFiles = new Set<string>();
@@ -99,6 +108,10 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
       const parsed = validateIngested(row);
       if (!parsed.ok) continue;
       const env = parsed.value;
+      if (env.id && processedEnvIds.has(env.id)) {
+        continue;
+      }
+      if (env.id) processedEnvIds.add(env.id);
       const orderOrErr = buildOrderRequest(env, {
         mode,
         liveTradeCount,

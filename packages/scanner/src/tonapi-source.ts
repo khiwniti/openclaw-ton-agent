@@ -60,26 +60,30 @@ async function fetchPoolForMaster(master: string): Promise<{ master: string; poo
     const r = await tonapiGet(`/jettons/${master}/pools`, { timeoutMs: 8_000 });
     const pools = Array.isArray(r.data?.pools) ? r.data.pools : [];
     const pool = pools.find((p: any) => p && p.address) ?? pools[0];
-    if (!pool) return null;
+    if (pool && pool.address) {
+      let priceTon: number | null = null;
+      let liquidityTon: number | null = null;
+      let curvePct: number | null = null;
 
-    let priceTon: number | null = null;
-    let liquidityTon: number | null = null;
-    let curvePct: number | null = null;
+      if (pool?.price) {
+        priceTon = Number(pool.price);
+      }
+      if (Number.isFinite(pool?.liquidity)) {
+        liquidityTon = Number(pool.liquidity);
+      }
+      if (Number.isFinite(pool?.curvePct)) {
+        curvePct = Number(pool.curvePct);
+      }
 
-    if (pool?.price) {
-      priceTon = Number(pool.price);
+      return { master, pool, priceTon, liquidityTon, curvePct };
     }
-    if (Number.isFinite(pool?.liquidity)) {
-      liquidityTon = Number(pool.liquidity);
-    }
-    if (Number.isFinite(pool?.curvePct)) {
-      curvePct = Number(pool.curvePct);
-    }
-
-    return { master, pool, priceTon, liquidityTon, curvePct };
   } catch {
-    return null;
+    // continue
   }
+
+  // Return null if no pool exists — never fabricate a fake quote
+  return null;
 }
 
 export const tonapiSource: ScannerSource = tonapiSourceImpl;
+

@@ -131,8 +131,9 @@ export function runBacktest(opts: RunBacktestOptions): BacktestResult {
 
     const setup = pointSetup({
       entryTon: entryBar.priceTon,
-      curvePct: env.token.curvePct,
+      curvePct: env.token.curvePct ?? null,
       rrTarget: opts.strategy?.rrTarget,
+
       volPct,
     });
     const fees = totalCostTon();
