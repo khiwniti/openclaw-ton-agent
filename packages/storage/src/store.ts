@@ -11,6 +11,7 @@ class Store {
     fs.mkdirSync(path.dirname(file), { recursive: true })
     this.db = new Sqlite(file)
     this.db.pragma("journal_mode = WAL")
+    this.db.pragma("busy_timeout = 5000")
     this.migrate()
   }
 
