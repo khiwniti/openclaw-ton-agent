@@ -16,6 +16,11 @@ export SQLITE_PATH=${SQLITE_PATH:-$DATA_DIR/agent.db}
 export OPENCLAW_STATE_DIR=${OPENCLAW_STATE_DIR:-$DATA_DIR/.openclaw}
 mkdir -p "$DATA_DIR" "$OPENCLAW_STATE_DIR"
 chown -R node:node "$DATA_DIR" 2>/dev/null || true
+
+# Clean stale gated/signals files on boot so risk-gates rebuilds from current scanner output.
+# This prevents the executor from repeatedly skipping every envelope due to missing meta.gate.
+rm -f "$DATA_DIR/gated-"*.ndjson "$DATA_DIR/signals-"*.ndjson 2>/dev/null || true
+
 # Export environment for both processes
 export NODE_ENV=${NODE_ENV:-production}
 export OBSERVE_ONLY=${OBSERVE_ONLY:-true}

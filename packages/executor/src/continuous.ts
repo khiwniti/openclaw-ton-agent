@@ -300,6 +300,18 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
               exitPriceTon: step.exitPriceTon,
             });
 
+            if (pos.amountTon < EXEC_CONFIG.minOrderTon) {
+              log.warn("position below min order size, closing as dust", {
+                ticker: pos.ticker,
+                amountTon: pos.amountTon,
+                minOrderTon: EXEC_CONFIG.minOrderTon,
+                reason: step.reason,
+              });
+              openPositionsMap.delete(pos.tokenAddress);
+              positionsJournal.append({ kind: "position.closed", pos, ts: Date.now(), reason: "dust" });
+              continue;
+            }
+
             const sellOrder: OrderRequest = {
               id: newId("ord"),
               ts: now,

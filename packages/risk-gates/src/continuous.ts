@@ -89,6 +89,7 @@ export async function runContinuousRiskGates(opts: {
 }
 
 if (process.argv[1] && process.argv[1].endsWith("continuous.ts")) {
+  console.error("[RISK-GATES] entry point", JSON.stringify({ dataDir: process.env.DATA_DIR, network: process.env.TON_NETWORK }));
   const dataDir = process.env.DATA_DIR || "/app/data";
   const network = process.env.TON_NETWORK || "testnet";
   const signalsPath = path.join(dataDir, `signals-${network}.ndjson`);
