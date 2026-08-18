@@ -4,12 +4,12 @@
  * Watches the gated journal directory for new gated-*.ndjson files,
  * processes them in order, and writes orders/fills journals.
  */
-import { Journal, readJournal, validateIngested, createLogger, type OrderRequest, type ExecutionMode } from "@openclaw-ton-agent/shared";
+import { Journal, readJournal, validateIngested, createLogger, newId, type OrderRequest, type ExecutionMode } from "@openclaw-ton-agent/shared";
+import { openPosition, stepPosition, type Position } from "@openclaw-ton-agent/exit-manager";
 import { EXEC_CONFIG } from "./config";
 import { buildOrderRequest } from "./order-builder";
 import { Executor } from "./modes";
 import { PaperWallet, ActonWallet } from "./wallet.js";
-
 
 import * as fs from "fs";
 import * as path from "path";
@@ -52,6 +52,64 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
 
   const ordersJournal = new Journal(opts.ordersOut);
   const fillsJournal = new Journal(opts.fillsOut);
+  const positionsPath = path.join(opts.gatedDir, `positions-${EXEC_CONFIG.network}.ndjson`);
+  const positionsJournal = new Journal(positionsPath);
+  const openPositionsMap = new Map<string, Position>();
+
+  // 1. Restore positions from positions journal
+  if (fs.existsSync(positionsPath)) {
+    const pRows = readJournal(positionsPath);
+    for (const r of pRows) {
+      if (!r || typeof r !== "object") continue;
+      const row = r as { kind?: string; pos?: Position };
+      if (row.kind === "position.open" && row.pos?.tokenAddress) {
+        openPositionsMap.set(row.pos.tokenAddress, row.pos);
+      } else if (row.kind === "position.closed" && row.pos?.tokenAddress) {
+        openPositionsMap.delete(row.pos.tokenAddress);
+      }
+    }
+  }
+
+  // 2. Reconstruct from orders journal for any filled buys without sells
+  if (fs.existsSync(opts.ordersOut)) {
+    const orders = readJournal(opts.ordersOut);
+    const soldTokens = new Set<string>();
+    for (const o of orders) {
+      if (o && typeof o === "object" && (o as { side?: string }).side === "sell" && (o as { token?: { address?: string } }).token?.address) {
+        soldTokens.add((o as { token: { address: string } }).token.address);
+        openPositionsMap.delete((o as { token: { address: string } }).token.address);
+      }
+    }
+
+    for (const o of orders) {
+      if (!o || typeof o !== "object") continue;
+      const ord = o as OrderRequest;
+      if (ord.side === "buy" && ord.token?.address && !soldTokens.has(ord.token.address) && !openPositionsMap.has(ord.token.address)) {
+        const entryPrice = ord.entryTon && ord.entryTon > 0 ? ord.entryTon : 1.0;
+        const stopLossTon = ord.stopLossTon && ord.stopLossTon > 0 ? ord.stopLossTon : entryPrice * 0.95;
+        const takeProfitTon = ord.takeProfitTon && ord.takeProfitTon > 0 ? ord.takeProfitTon : entryPrice * 1.5;
+        const pos = openPosition({
+          orderId: ord.id,
+          tokenAddress: ord.token.address,
+          ticker: ord.token.ticker,
+          entryTon: entryPrice,
+          amountTon: ord.amountTon,
+          stopLossTon,
+          takeProfitTon,
+          entryTs: ord.ts || Date.now(),
+          mode: "snipe",
+          feesTon: 0.02,
+          timeStopMs: 30 * 60_000,
+          atrAtEntry: entryPrice * 0.05,
+          swingLow: null,
+          swingHigh: null,
+          ladderExits: [],
+        });
+        openPositionsMap.set(ord.token.address, pos);
+      }
+    }
+  }
+  log.info("initialized open positions tracker", { activeCount: openPositionsMap.size });
 
   let liveTradeCount = 0;
   const stats: HealthStats = {
@@ -124,8 +182,39 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
         log.warn("skipping envelope", { ticker: env.token?.ticker ?? "?", error: orderOrErr.error });
         continue;
       }
+      if (orderOrErr.side === "buy" && openPositionsMap.size >= 3) {
+        log.info("max concurrent positions reached, skipping new entry", { activePositions: openPositionsMap.size });
+        continue;
+      }
       const res = await executor.submit(orderOrErr);
-      if (res.action === "executed" || res.action === "booked") liveTradeCount++;
+      if ((res.action === "executed" || res.action === "booked") && res.fill?.status !== "bounced") {
+        liveTradeCount++;
+        if (orderOrErr.side === "buy") {
+          const entryPrice = orderOrErr.entryTon && orderOrErr.entryTon > 0 ? orderOrErr.entryTon : 1.0;
+          const stopLossTon = orderOrErr.stopLossTon && orderOrErr.stopLossTon > 0 ? orderOrErr.stopLossTon : entryPrice * 0.95;
+          const takeProfitTon = orderOrErr.takeProfitTon && orderOrErr.takeProfitTon > 0 ? orderOrErr.takeProfitTon : entryPrice * 1.5;
+          const pos = openPosition({
+            orderId: orderOrErr.id,
+            tokenAddress: orderOrErr.token.address,
+            ticker: orderOrErr.token.ticker,
+            entryTon: entryPrice,
+            amountTon: orderOrErr.amountTon,
+            stopLossTon,
+            takeProfitTon,
+            entryTs: Date.now(),
+            mode: "snipe",
+            feesTon: 0.02,
+            timeStopMs: 30 * 60_000,
+            atrAtEntry: entryPrice * 0.05,
+            swingLow: null,
+            swingHigh: null,
+            ladderExits: [],
+          });
+          openPositionsMap.set(orderOrErr.token.address, pos);
+          positionsJournal.append({ kind: "position.open", pos, ts: Date.now() });
+          log.info("position opened", { ticker: pos.ticker, amountTon: pos.amountTon, entryTon: pos.entryTon, sl: pos.stopLossTon, tp: pos.takeProfitTon });
+        }
+      }
       fileOrders++;
       log.info("order processed", {
         action: res.action,
@@ -136,7 +225,6 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
         reason: res.fill?.reason,
       });
     }
-
     processedLines.set(fileName, rows.length);
     if (!processedFiles.has(fileName)) {
       processedFiles.add(fileName);
@@ -163,8 +251,89 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
       stats.lastError = (e as Error)?.message ?? String(e);
       log.error("scan failed", e as Error);
     }
-  };
 
+    // Monitor and step open positions for automated TP/SL/Time-stop exits
+    if (openPositionsMap.size > 0) {
+      const now = Date.now();
+      for (const [address, pos] of openPositionsMap.entries()) {
+        try {
+          let currentPriceTon = pos.entryTon;
+          try {
+            const res = await fetch(`https://api.ston.fi/v1/assets/${address}`, { signal: AbortSignal.timeout(4000) });
+            if (res.ok) {
+              const data = (await res.json()) as { asset?: { dex_usd_price?: string; third_party_usd_price?: string } };
+              const priceUsd = Number(data.asset?.dex_usd_price ?? data.asset?.third_party_usd_price);
+              if (Number.isFinite(priceUsd) && priceUsd > 0) {
+                currentPriceTon = priceUsd / (await getTonPriceUsd());
+              }
+            }
+          } catch {
+            // use fallback
+          }
+
+          const step = stepPosition(pos, currentPriceTon, now);
+          openPositionsMap.set(address, step.pos);
+
+          if (step.action !== "hold") {
+            log.info("position exit triggered", {
+              ticker: pos.ticker,
+              action: step.action,
+              reason: step.reason,
+              entryTon: pos.entryTon,
+              exitPriceTon: step.exitPriceTon,
+            });
+
+            const sellOrder: OrderRequest = {
+              id: newId("ord"),
+              ts: now,
+              gatedEnvelopeId: pos.orderId,
+              source: "exit-manager",
+              side: "sell",
+              mode,
+              confirmRequired: false,
+              amountTon: pos.amountTon,
+              entryTon: pos.entryTon,
+              stopLossTon: pos.stopLossTon,
+              takeProfitTon: pos.takeProfitTon,
+              expectedWinTon: pos.amountTon * 0.3,
+              tier: "low",
+              token: {
+                address: pos.tokenAddress,
+                ticker: pos.ticker,
+                decimals: 9,
+              },
+              slippageBps: EXEC_CONFIG.slippageBps,
+              deadlineMs: now + 60_000,
+              minOutTokenQty: 0,
+              expectedTokenQty: pos.qty,
+              rRatio: 1.5,
+              expectedValueTon: 0.1,
+            };
+            const sellRes = await executor.submit(sellOrder);
+            log.info("sell order processed", {
+              action: sellRes.action,
+              ticker: pos.ticker,
+              fillStatus: sellRes.fill?.status,
+              orderId: sellOrder.id,
+            });
+
+            positionsJournal.append({
+              kind: "position.closed",
+              pos: step.pos,
+              action: step.action,
+              reason: step.reason,
+              exitPriceTon: step.exitPriceTon,
+              ts: now,
+            });
+
+            openPositionsMap.delete(address);
+          }
+        } catch (err) {
+          log.error("error monitoring position", err as Error);
+        }
+      }
+    }
+  };
   // Initial scan
   await scanAndProcess();
 
@@ -195,6 +364,30 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
   }
 
   return { stop: shutdown, stats };
+}
+
+let _cachedTonPriceUsd = 1.0;
+let _lastTonPriceFetch = 0;
+async function getTonPriceUsd(): Promise<number> {
+  const now = Date.now();
+  if (now - _lastTonPriceFetch < 60_000 && _cachedTonPriceUsd > 0) return _cachedTonPriceUsd;
+  try {
+    const res = await fetch("https://api.ston.fi/v1/assets/EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c", {
+      signal: AbortSignal.timeout(4_000),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { asset?: { dex_usd_price?: string; third_party_usd_price?: string } };
+      const p = Number(data.asset?.dex_usd_price ?? data.asset?.third_party_usd_price);
+      if (Number.isFinite(p) && p > 0) {
+        _cachedTonPriceUsd = p;
+        _lastTonPriceFetch = now;
+        return p;
+      }
+    }
+  } catch {
+    // use cached
+  }
+  return _cachedTonPriceUsd;
 }
 
 function createHealthServer(port: number, getStats: () => HealthStats) {

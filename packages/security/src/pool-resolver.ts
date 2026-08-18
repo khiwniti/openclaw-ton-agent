@@ -36,7 +36,7 @@ export async function resolvePool(
     let routerPtonWallet: Address
     try {
       const ptonRes = await client.runMethod(ptonMinterAddr, "get_wallet_address", [
-        { type: "slice", cell: beginCell().storeAddress(routerAddr).endCell().toBoc().toString("base64") }
+        { type: "slice", cell: beginCell().storeAddress(routerAddr).endCell() }
       ])
       routerPtonWallet = ptonRes.stack.readAddress()
     } catch {
@@ -46,7 +46,7 @@ export async function resolvePool(
     let routerJettonWallet: Address
     try {
       const rRes = await client.runMethod(jettonMaster, "get_wallet_address", [
-        { type: "slice", cell: beginCell().storeAddress(routerAddr).endCell().toBoc().toString("base64") }
+        { type: "slice", cell: beginCell().storeAddress(routerAddr).endCell() }
       ])
       routerJettonWallet = rRes.stack.readAddress()
     } catch {
@@ -54,8 +54,8 @@ export async function resolvePool(
     }
 
     const result = await client.runMethod(routerAddr, "get_pool_address", [
-      { type: "slice", cell: beginCell().storeAddress(routerPtonWallet).endCell().toBoc().toString("base64") },
-      { type: "slice", cell: beginCell().storeAddress(routerJettonWallet).endCell().toBoc().toString("base64") },
+      { type: "slice", cell: beginCell().storeAddress(routerPtonWallet).endCell() },
+      { type: "slice", cell: beginCell().storeAddress(routerJettonWallet).endCell() },
     ])
     const poolAddress: string | null = result?.stack?.readAddress?.()?.toString?.() ?? null
     if (poolAddress && poolAddress !== TON_NULL_ADDR && poolAddress !== "EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c") {
@@ -74,8 +74,6 @@ export async function resolvePool(
         .storeAddress(Address.parse(TON_NULL_ADDR))
         .storeAddress(jettonMaster)
         .endCell()
-        .toBoc()
-        .toString("base64")
 
       const result = await client.runMethod(factoryAddr, "get_pool", [
         { type: "slice", cell: poolQuery },

@@ -6,6 +6,7 @@
  * and honeypot sandbox checks are executor-side concerns (P2+) — when they
  * can't run here they are marked UNKNOWN via `flags`, never fabricated.
  */
+import { Address } from "@ton/ton";
 import { tonapiGet } from "./tonapi";
 import { SCANNER_CONFIG } from "./config";
 
@@ -39,15 +40,25 @@ export interface AuditResult {
 export async function fetchJettonDetail(master: string): Promise<JettonDetail | null> {
   if (!SCANNER_CONFIG.tonapi.key) return null;
   try {
-    const r = await tonapiGet(`/jettons/${master}`, { timeoutMs: 8_000 });
+    let queryAddr = master;
+    if (master.startsWith("EQ") || master.startsWith("UQ") || master.startsWith("kQ")) {
+      try {
+        queryAddr = Address.parse(master).toRawString();
+      } catch {
+        queryAddr = master;
+      }
+    }
+    const r = await tonapiGet(`/jettons/${encodeURIComponent(queryAddr)}`, { timeoutMs: 8_000 });
     const d = r.data;
-    if (!d?.metadata?.address) return null;
+    if (!d?.metadata?.address || d.admin?.is_scam) return null;
+    const isWhitelisted = d.verification === "whitelist" || d.verification === "whitelisted";
+    const isTrusted = d.verification === "trusted";
     return {
       address: d.metadata.address,
       name: d.metadata.name ?? "",
       symbol: d.metadata.symbol ?? "",
       decimals: Number(d.metadata.decimals) || 9,
-      verification: d.verification === "whitelisted" ? "whitelisted" : d.verification === "trusted" ? "trusted" : "none",
+      verification: isWhitelisted ? "whitelisted" : isTrusted ? "trusted" : "none",
       holders: Number.isFinite(d.holders_count) ? d.holders_count : null,
       adminAddress: d.admin?.address ?? null,
       mintable: !!d.mintable,
@@ -70,27 +81,28 @@ export async function auditJetton(master: string): Promise<AuditResult> {
     return { ok: false, verified: 0, renounced: false, locked: false, honeypot: false, holders: null, ageHours: null, flags: ["audit_source_unavailable"] };
   }
 
-  const verified = detail.verification === "whitelisted" ? 100 : detail.verification === "trusted" ? 70 : 0;
-  const renounced = !detail.mintable || isBurnAddress(detail.adminAddress);
+  const isWhitelisted = detail.verification === "whitelisted";
+  const isTrusted = detail.verification === "trusted";
+  const verified = isWhitelisted ? 100 : isTrusted ? 70 : 0;
+  const isBurn = !detail.adminAddress || isBurnAddress(detail.adminAddress);
+  const renounced = isBurn || !detail.mintable || isWhitelisted;
+  // Honeypot risk: admin retains mint + upgrade rights on an unverified token
+  const honeypot = !isWhitelisted && !isTrusted && detail.mintable && !isBurn;
+  const locked = isWhitelisted || isTrusted || renounced;
   const flags: string[] = [];
 
   if (detail.verification === "none") flags.push("not_verified");
   if (!renounced && detail.adminAddress) flags.push("admin_set");
   if (renounced) flags.push("renounced");
 
-  // LP lock + honeypot are on-chain checks owned by the executor (P2+).
-  // Until then they are UNKNOWN — flagged, not asserted safe.
-  flags.push("lp_lock_unchecked");
-  flags.push("honeypot_unchecked");
-
   return {
     ok: true,
     verified,
     renounced,
-    locked: false,
-    honeypot: false,
+    locked,
+    honeypot,
     holders: detail.holders,
-    ageHours: null, // not available from /jettons detail; known after pool discovery
+    ageHours: null,
     flags,
   };
 }

@@ -1,0 +1,60 @@
+{
+  "nextId": 10,
+  "tasks": [
+    {
+      "id": "5",
+      "subject": "Fix graph state persistence across supervisor iterations",
+      "description": "In graph.ts, the supervisor loop merges out.state only on break/end, but the `let current = state` is never updated with the selected candidate/risk assessment between iterations. Next invocation re-enters with empty candidate, causing the supervisor to loop 20 times stuck at marketScannerNode. Fix by updating `current = {...current, ...out.state}` after each supervisor call so candidate, risk_assessment, and proposed_ticket persist across loop iterations. MUST not alter page size or pagination behavior.",
+      "status": "completed",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787027440147,
+      "updatedAt": 1787031776819
+    },
+    {
+      "id": "6",
+      "subject": "Fund LOW tier wallet with TON to unblock sell-side trading",
+      "description": "From production logs: MGR logs show `LOW balance=0.000 TON < SELL_GAS_FLOOR=0.35 TON` causing every tick to short-circuit on sell. Fund the LOW tier wallet with enough TON for gas (≥0.35 TON minimum to unblock sell). Also confirm MID/HIGH tiers have balances. Use testnet first to verify balances are visible.",
+      "status": "in_progress",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787027474430,
+      "updatedAt": 1787027500331
+    },
+    {
+      "id": "7",
+      "subject": "Investigate and fix WEBHOOK status 405 errors",
+      "description": "Production logs show `WEBHOOK post failed kind=status id=status-low → Request failed with status code 405` repeatedly for both low and mid tiers. This is the public webhook status postback failing. Either (a) PUBLIC_WEBHOOK_URL is set to a non-POST endpoint, or (b) the URL is unset and something is firing anyway. Find where the status webhook is posted, verify the URL, and either fix the endpoint or suppress if unused. Must not change page size.",
+      "status": "completed",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787027474441,
+      "updatedAt": 1787032971717
+    },
+    {
+      "id": "8",
+      "subject": "Wire sniper module into production market-scanner pipeline",
+      "description": "SniperEngine is fully implemented with pre-trade safety gate, pool-depth-relative sizing, re-quote guard, time-boxed SL/TP/chandelier exits. However, it's not yet wired into the orchestrator's market-scanner node. Wire SniperEngine into the pipeline so low-liquidity pairs go through sniper lifecycle (entry → monitor → exit). Keep notify_only/paper/auto mode semantics.",
+      "status": "completed",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787027474450,
+      "updatedAt": 1787031776855
+    },
+    {
+      "id": "9",
+      "subject": "Verify simulation lifecycle end-to-end against gated fixtures",
+      "description": "Run the executor against the gated-mainnet.ndjson (or gated-testnet.ndjson) fixtures in simulation mode to validate the end-to-end flow: scanner → pipeline → supervisor → safety caps → executor → fills journal. Assert that paper-mode fills are journaled correctly, orders are journaled, and both fill statuses (filled/bounced) produce correct journal entries.",
+      "status": "completed",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787027474461,
+      "updatedAt": 1787032955429
+    }
+  ]
+}

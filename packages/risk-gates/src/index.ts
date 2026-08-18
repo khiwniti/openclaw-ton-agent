@@ -8,7 +8,7 @@ export type { GateContext, GateResult, GateVerdict } from "./gates";
 export { createMacroFeed, isMacroRiskOff } from "./macro-feed";
 export { PreTradeGate, createPreTradeGate } from "./safety-gate";
 export type { SafetyConfig, SafetyCheckResult, SafetyCheck, JettonMasterData, PoolDepth } from "./safety-gate";
-export { SniperEngine, createSniperEngine } from "./sniper";
+export { SniperEngine, createSniperEngine, sniperPositionSize } from "./sniper";
 export type { SniperConfig, SnipeResult, SnipeContext, DexClient } from "./sniper";
 export { SystemicCircuitBreaker, createSystemicCircuitBreaker } from "./circuit-breaker";
 export type { CircuitBreakerConfig, CircuitBreakerState, TonMarketData } from "./circuit-breaker";

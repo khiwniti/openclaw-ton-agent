@@ -20,6 +20,7 @@ import { createStats, startHealthServer } from "./health";
 export { tonapiSource, replaySource };
 export type { ScannerSource, JettonView } from "./replay";
 export { SCANNER_CONFIG } from "./config";
+export { createSniperDexClient, buildSnipeContext } from "./sniper-client";
 
 const log = createLogger("scanner");
 

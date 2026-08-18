@@ -11,6 +11,7 @@
     "continuous": "tsx src/continuous.ts"
   },
   "dependencies": {
+    "@openclaw-ton-agent/exit-manager": "*",
     "@openclaw-ton-agent/risk-gates": "*",
     "@openclaw-ton-agent/shared": "*",
     "@ton/ton": "^15.1.0",

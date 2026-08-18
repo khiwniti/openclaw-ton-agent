@@ -15,7 +15,7 @@ export GATED_DIR=${GATED_DIR:-$DATA_DIR}
 export SQLITE_PATH=${SQLITE_PATH:-$DATA_DIR/agent.db}
 export OPENCLAW_STATE_DIR=${OPENCLAW_STATE_DIR:-$DATA_DIR/.openclaw}
 mkdir -p "$DATA_DIR" "$OPENCLAW_STATE_DIR"
-chown -R appuser:appgroup "$DATA_DIR" 2>/dev/null || true
+chown -R node:node "$DATA_DIR" 2>/dev/null || true
 # Export environment for both processes
 export NODE_ENV=${NODE_ENV:-production}
 export OBSERVE_ONLY=${OBSERVE_ONLY:-true}

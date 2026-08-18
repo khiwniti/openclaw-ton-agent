@@ -57,6 +57,14 @@ export type GramTradeState = {
   journal_ref?: string
 }
 
+export interface SniperMeta {
+  viable: boolean;
+  sizeTon: number;
+  reason: string;
+  gatePassed: boolean;
+  blockReason?: string;
+}
+
 export interface JettonCandidate {
   jetton_master: string
   symbol?: string
@@ -71,6 +79,7 @@ export interface JettonCandidate {
   bonding_curve_pct?: number
   source: "stonfi" | "dedust" | "tonapi" | "manual"
   enriched_at: number
+  sniper?: SniperMeta | null;
 }
 
 export interface ExecutionResult {

@@ -1,7 +1,8 @@
 import type { OrderRequest } from "@openclaw-ton-agent/shared";
+import { createLogger } from "@openclaw-ton-agent/shared";
 import type { WalletAdapter } from "../wallet.js";
 import type { ActonCommandOptions } from "./index.js";
-import { Address, beginCell, toNano, TonClient, WalletContractV5R1, SendMode, internal } from "@ton/ton";
+import { Address, beginCell, toNano, TonClient, WalletContractV4, WalletContractV5R1, SendMode, internal } from "@ton/ton";
 import { mnemonicToPrivateKey } from "@ton/crypto";
 
 export interface ActonWalletOptions extends ActonCommandOptions {
@@ -92,35 +93,15 @@ export class ActonWallet implements WalletAdapter {
         if (mnemonic) {
           try {
             const key = await mnemonicToPrivateKey(mnemonic.split(" "));
-            const walletId = this.opts.network === "testnet" ? { networkGlobalId: -3 } : undefined;
-            const wallet = WalletContractV5R1.create({ workchain: 0, publicKey: key.publicKey, walletId });
-            
-            // Try TonAPI first
-            const tonapiKey = process.env.TONAPI_KEY;
-            const tonapiBase = (process.env.TONAPI_BASE || (this.opts.network === "testnet" ? "https://testnet.tonapi.io/v2" : "https://tonapi.io/v2")).replace(/\/+$/, "");
-            try {
-              const res = (await fetch(`${tonapiBase}/accounts/${wallet.address.toRawString()}`, {
-                headers: tonapiKey ? { Authorization: `Bearer ${tonapiKey}` } : {},
-                signal: AbortSignal.timeout(4000),
-              }).then((r) => r.json())) as { balance?: string | number };
-              if (res?.balance !== undefined) {
-                balanceTon = Number(res.balance) / 1e9;
-              }
-            } catch {
-              // fallback to TonClient
-            }
-
-            // If TonAPI was unavailable or 0, query on-chain via TonClient
-            if (!balanceTon || balanceTon <= 0) {
-              const endpoint = this.opts.network === "mainnet"
-                ? "https://toncenter.com/api/v2/jsonRPC"
-                : "https://testnet.toncenter.com/api/v2/jsonRPC";
-              const toncenterApiKey = process.env.TONCENTER_API_KEY || process.env.TON_API_KEY;
-              const client = new TonClient({ endpoint, apiKey: toncenterApiKey });
-              const contract = client.open(wallet);
-              const bal = await contract.getBalance().catch(() => 0n);
-              balanceTon = Number(bal) / 1e9;
-            }
+            const toncenterApiKey = process.env.TONCENTER_API_KEY || process.env.TON_API_KEY;
+            const endpoint = this.opts.network === "mainnet"
+              ? "https://toncenter.com/api/v2/jsonRPC"
+              : "https://testnet.toncenter.com/api/v2/jsonRPC";
+            const client = new TonClient({ endpoint, apiKey: toncenterApiKey });
+            const wallet = await this.resolveWallet(client, key.publicKey);
+            const contract = client.open(wallet);
+            const bal = await contract.getBalance().catch(() => 0n);
+            balanceTon = Number(bal) / 1e9;
           } catch {
             balanceTon = 0;
           }
@@ -180,6 +161,34 @@ export class ActonWallet implements WalletAdapter {
       return "EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c";
     }
   }
+  private async resolveWallet(client: TonClient, publicKey: Buffer) {
+    const preferredVersion = (process.env.WALLET_VERSION || "").toLowerCase();
+    const walletId = this.opts.network === "testnet" ? { networkGlobalId: -3 } : undefined;
+    const w5 = WalletContractV5R1.create({ workchain: 0, publicKey, walletId });
+    const w4 = WalletContractV4.create({ workchain: 0, publicKey });
+
+    if (preferredVersion === "v4" || preferredVersion === "v4r2") {
+      return w4;
+    }
+    if (preferredVersion === "v5" || preferredVersion === "v5r1") {
+      return w5;
+    }
+
+    try {
+      const c4 = client.open(w4);
+      const b4 = await c4.getBalance().catch(() => 0n);
+      if (b4 > 0n) return w4;
+    } catch {}
+
+    try {
+      const c5 = client.open(w5);
+      const b5 = await c5.getBalance().catch(() => 0n);
+      if (b5 > 0n) return w5;
+    } catch {}
+
+    return w4;
+  }
+
 
   private async sendSwapDirect(payload: SwapPayload): Promise<{ ok: boolean; txHash?: string; error?: string }> {
     const mnemonic = this.opts.mnemonic ?? process.env.WALLET_MASTER_MNEMONIC;
@@ -196,13 +205,12 @@ export class ActonWallet implements WalletAdapter {
       const toncenterApiKey = process.env.TONCENTER_API_KEY || process.env.TON_API_KEY;
       const client = new TonClient({ endpoint, apiKey: toncenterApiKey });
       const key = await mnemonicToPrivateKey(mnemonic.split(" "));
-      const workchain = 0;
-      const walletId = this.opts.network === "testnet" ? { networkGlobalId: -3 } : undefined;
-      const wallet = WalletContractV5R1.create({ workchain, publicKey: key.publicKey, walletId });
+      const wallet = await this.resolveWallet(client, key.publicKey);
       const contract = client.open(wallet);
       const startSeqno = await contract.getSeqno().catch(() => 0);
+      const log = createLogger("acton-wallet");
+      log.info("wallet resolved", { address: wallet.address.toString(), seqno: startSeqno });
       const stateInit = startSeqno === 0 ? wallet.init : undefined;
-
       const routerAddrStr = this.opts.routerAddress || (this.opts.network === "testnet" ? STONFI_ROUTER_TESTNET : STONFI_ROUTER_MAINNET);
       const pTonMinterStr = this.opts.network === "testnet" ? STONFI_PTON_TESTNET : STONFI_PTON_MAINNET;
       const routerAddr = Address.parse(this.safeAddress(routerAddrStr));
@@ -211,6 +219,16 @@ export class ActonWallet implements WalletAdapter {
       const swapAmountNano = BigInt(Math.floor(payload.amountTon * 1e9));
       const minOutNano = BigInt(payload.minOutTokenQty);
 
+      if (payload.side === "buy") {
+        const currentBalNano = await contract.getBalance().catch(() => 0n);
+        const requiredNano = swapAmountNano + toNano("0.20");
+        if (currentBalNano < requiredNano) {
+          return {
+            ok: false,
+            error: `insufficient on-chain balance: have ${(Number(currentBalNano) / 1e9).toFixed(3)} TON, need ${(Number(requiredNano) / 1e9).toFixed(3)} TON`,
+          };
+        }
+      }
       let targetAddr: Address;
       let msgValue: bigint;
       let body;
@@ -253,7 +271,7 @@ export class ActonWallet implements WalletAdapter {
           .storeAddress(routerAddr)
           .storeAddress(wallet.address)
           .storeBit(0)
-          .storeCoins(toNano("0.185")) // forward_ton_amount for router execution gas
+          .storeCoins(toNano("0.12")) // forward_ton_amount for router execution gas
           .storeBit(1)
           .storeRef(forwardPayload)
           .endCell();
@@ -278,7 +296,7 @@ export class ActonWallet implements WalletAdapter {
         }
 
         targetAddr = routerPtonWallet;
-        msgValue = swapAmountNano + toNano("0.24");
+        msgValue = swapAmountNano + toNano("0.16");
       } else {
         // Resolve user jetton wallet
         let userJettonWallet: Address;
@@ -290,6 +308,24 @@ export class ActonWallet implements WalletAdapter {
         } catch {
           userJettonWallet = jettonMasterAddr;
         }
+
+        // Query actual on-chain jetton balance
+        let actualJettonBalanceNano = 0n;
+        try {
+          const balRes = await client.runMethod(userJettonWallet, "get_wallet_data");
+          actualJettonBalanceNano = balRes.stack.readBigNumber();
+        } catch {
+          // fallback
+        }
+
+        if (actualJettonBalanceNano <= 0n) {
+          return { ok: false, error: "No on-chain jetton balance available to sell" };
+        }
+
+        const requestedNano = BigInt(payload.jettonAmountNano ?? "0");
+        const sellAmountNano = requestedNano > 0n && requestedNano < actualJettonBalanceNano
+          ? requestedNano
+          : actualJettonBalanceNano;
 
         // Resolve router pTON wallet
         let routerPtonWallet: Address;
@@ -313,17 +349,17 @@ export class ActonWallet implements WalletAdapter {
         body = beginCell()
           .storeUint(0x0f8a7ea5, 32)
           .storeUint(Date.now(), 64)
-          .storeCoins(BigInt(payload.jettonAmountNano ?? "0"))
+          .storeCoins(sellAmountNano)
           .storeAddress(routerAddr)
           .storeAddress(wallet.address)
           .storeBit(0)
-          .storeCoins(toNano("0.185"))
+          .storeCoins(toNano("0.14"))
           .storeBit(1)
           .storeRef(forwardPayload)
           .endCell();
 
         targetAddr = userJettonWallet;
-        msgValue = toNano("0.25");
+        msgValue = toNano("0.20");
       }
 
       const swapMsg = internal({
@@ -332,13 +368,6 @@ export class ActonWallet implements WalletAdapter {
         body,
       });
 
-      const transfer = contract.createTransfer({
-        seqno: startSeqno,
-        secretKey: key.secretKey,
-        sendMode: SendMode.PAY_GAS_SEPARATELY | SendMode.IGNORE_ERRORS,
-        messages: [swapMsg],
-        ...(stateInit ? { stateInit } : {}),
-      });
       let sent = false;
       let lastErr: unknown;
 
@@ -347,14 +376,19 @@ export class ActonWallet implements WalletAdapter {
           if (attempt > 0) {
             await new Promise<void>((resolve) => setTimeout(resolve, 1000 * attempt));
           }
-          await client.sendExternalMessage(wallet, transfer);
+          await contract.sendTransfer({
+            seqno: startSeqno,
+            secretKey: key.secretKey,
+            sendMode: SendMode.PAY_GAS_SEPARATELY | SendMode.IGNORE_ERRORS,
+            messages: [swapMsg],
+            ...(stateInit ? { stateInit } : {}),
+          });
           sent = true;
           break;
         } catch (e: unknown) {
           lastErr = e;
         }
       }
-
       if (!sent) {
         throw lastErr ?? new Error("broadcast failed after retries");
       }

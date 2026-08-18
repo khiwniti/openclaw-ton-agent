@@ -11,6 +11,10 @@ primary_region = 'sin'
 # Graceful shutdown configuration
 kill_signal = "SIGTERM"
 kill_timeout = "60s"
+[mounts]
+  source = 'ton_agent_data'
+  destination = '/app/data'
+
 
 # Unified container runs scanner + executor via scripts/start-unified.sh
 [[services]]
@@ -72,10 +76,10 @@ kill_timeout = "60s"
   GATE_VOL_CAP_PCT = "0.25"
   GATE_ATR_PERIOD = "20"
   GATE_TRADE_FLOOR_SCORE = "0"
-  GATE_BANKROLL_TON = "5.0"
-  GATE_TIER_LOW_CAP_TON = "0.25"
-  GATE_TIER_MID_CAP_TON = "0.40"
-  GATE_TIER_HIGH_CAP_TON = "0.60"
+  GATE_BANKROLL_TON = "2.0"
+  GATE_TIER_LOW_CAP_TON = "0.20"
+  GATE_TIER_MID_CAP_TON = "0.35"
+  GATE_TIER_HIGH_CAP_TON = "0.50"
   GATE_MIN_RR = "1.5"
   GATE_MIN_WIN_PROBABILITY = "0.01"
   GATE_FEE_COVERAGE_MULT = "1"

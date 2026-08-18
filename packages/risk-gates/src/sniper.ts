@@ -213,30 +213,11 @@ export class SniperEngine {
   /**
    * Calculate position size based on pool depth.
    * Caps at maxPoolSharePct of pool reserves, clamped to [absoluteMinTon, absoluteMaxTon].
+   * Delegates to the exported sniperPositionSize helper so callers outside the
+   * scanner can use the same sizing rules.
    */
   private calculatePositionSize(ctx: SnipeContext): { sizeTon: number; reason: string } {
-    const poolShare = this.config.maxPoolSharePct!;
-    const poolDepth = ctx.poolDepth;
-    
-    // Max size = poolShare * TON reserve
-    const maxByDepth = poolDepth.tonReserve * poolShare;
-    
-    // Clamp to absolute bounds
-    const minTon = this.config.absoluteMinTon!;
-    const maxTon = this.config.absoluteMaxTon!;
-    
-    const size = Math.min(maxByDepth, maxTon);
-    const clamped = Math.max(minTon, size);
-    
-    if (clamped < minTon) {
-      return { sizeTon: 0, reason: `Pool too thin: ${poolDepth.tonReserve.toFixed(2)} TON reserve, need at least ${minTon / poolShare} TON for ${(poolShare * 100).toFixed(0)}% share` };
-    }
-    
-    if (maxByDepth < minTon) {
-      return { sizeTon: 0, reason: `Pool depth insufficient: ${maxByDepth.toFixed(2)} TON at ${(poolShare * 100).toFixed(0)}% share < min ${minTon} TON` };
-    }
-    
-    return { sizeTon: clamped, reason: `Sized at ${clamped.toFixed(2)} TON (${(poolShare * 100).toFixed(1)}% of ${poolDepth.tonReserve.toFixed(2)} TON pool)` };
+    return sniperPositionSize(ctx, this.config);
   }
 
   /**
@@ -348,6 +329,35 @@ export class SniperEngine {
     const depth = await this.dex.getPoolDepth(jettonAddress);
     return depth?.priceTon ?? 0;
   }
+}
+
+/**
+ * Shared position-sizing logic extracted from SniperEngine so the market
+ * scanner can evaluate sniper viability without instantiating the engine.
+ */
+export function sniperPositionSize(
+  ctx: SnipeContext,
+  cfg: Required<Pick<SniperConfig, "maxPoolSharePct" | "absoluteMinTon" | "absoluteMaxTon">>
+): { sizeTon: number; reason: string } {
+  const maxByDepth = ctx.poolDepth.tonReserve * cfg.maxPoolSharePct;
+  const size = Math.min(maxByDepth, cfg.absoluteMaxTon);
+  const clamped = Math.max(cfg.absoluteMinTon, size);
+  if (clamped < cfg.absoluteMinTon) {
+    return {
+      sizeTon: 0,
+      reason: `Pool too thin: ${ctx.poolDepth.tonReserve.toFixed(2)} TON reserve, need at least ${cfg.absoluteMinTon / cfg.maxPoolSharePct} TON for ${(cfg.maxPoolSharePct * 100).toFixed(0)}% share`,
+    };
+  }
+  if (maxByDepth < cfg.absoluteMinTon) {
+    return {
+      sizeTon: 0,
+      reason: `Pool depth insufficient: ${maxByDepth.toFixed(2)} TON at ${(cfg.maxPoolSharePct * 100).toFixed(0)}% share < min ${cfg.absoluteMinTon} TON`,
+    };
+  }
+  return {
+    sizeTon: clamped,
+    reason: `Sized at ${clamped.toFixed(2)} TON (${(cfg.maxPoolSharePct * 100).toFixed(1)}% of ${ctx.poolDepth.tonReserve.toFixed(2)} TON pool)`,
+  };
 }
 
 /**

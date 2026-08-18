@@ -11,7 +11,7 @@ import { newId } from "./newid";
 export const ExecutionModeSchema = z.enum(["notify_only", "paper", "auto"]);
 export type ExecutionMode = z.infer<typeof ExecutionModeSchema>;
 
-export const OrderSideSchema = z.literal("buy"); // v0: entries are buys
+export const OrderSideSchema = z.enum(["buy", "sell"]);
 export type OrderSide = z.infer<typeof OrderSideSchema>;
 
 export const OrderRequestSchema = z.object({

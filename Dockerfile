@@ -53,11 +53,15 @@ RUN npm run typecheck
 # We compile each workspace package individually because tsconfig refs are not set.
 RUN set -euo pipefail;                                         \
   for pkg in packages/*/; do                                    \
-    cd "$pkg";                                                  \
-    npx tsc --project tsconfig.json --outDir dist --declaration false || \
-    npx tsc --outDir dist --declaration false || true;          \
-    # If build produced no JS (no tsconfig or nothing to compile), create a stub so COPY works \
-    if [ ! -d dist ]; then mkdir -p dist; echo 'export {};' > dist/index.js; fi;   \
+    if [ -d "$pkg" ]; then                                      \
+      cd "$pkg";                                                \
+      if [ -f tsconfig.json ]; then                              \
+        npx tsc --project tsconfig.json --outDir dist --declaration false || \
+        npx tsc --outDir dist --declaration false || true;       \
+      fi;                                                        \
+      if [ ! -d dist ]; then mkdir -p dist; echo 'export {};' > dist/index.js; fi; \
+      cd - > /dev/null;                                          \
+    fi;                                                          \
   done
 
 # Prebuild native sqlite3 bindings on alpine at build time so the runtime
@@ -72,16 +76,13 @@ WORKDIR /app
 # dumb-init gives proper signal handling for unified multi-process container
 RUN apk add --no-cache dumb-init
 
-# Add non-root user
-RUN addgroup -g 1001 -S appgroup && \
-    adduser -u 1001 -S appuser -G appgroup
 
 # Copy compiled JS, runtime deps, and configuration
-COPY --from=builder /app/package.json /app/package-lock.json ./
-COPY --from=builder /app/node_modules node_modules
-COPY --from=builder /app/packages packages
-COPY --from=builder /app/openclaw  openclaw
-COPY --from=builder /app/scripts   scripts
+COPY --from=builder --chown=node:node /app/package.json /app/package-lock.json ./
+COPY --from=builder --chown=node:node /app/node_modules node_modules
+COPY --from=builder --chown=node:node /app/packages packages
+COPY --from=builder --chown=node:node /app/openclaw  openclaw
+COPY --from=builder --chown=node:node /app/scripts   scripts
 
 # Runtime environment: avoid ESM/tsx surprises and .ts cache poisoning
 ENV NODE_OPTIONS="--no-warnings=ExperimentalWarning"
@@ -90,10 +91,10 @@ ENV NODE_PATH="/app/node_modules:/app/packages"
 ENV PYTHON=""
 
 # Data directory for SQLite journals and .openclaw state
-RUN mkdir -p /app/data && chown -R appuser:appgroup /app/data
+RUN mkdir -p /app/data && chown -R node:node /app/data
 
 # Switch to non-root user
-USER appuser
+USER node
 
 # Unifed startup (scanner + risk-gates + executor + api in one container)
 ENTRYPOINT ["dumb-init", "--"]
