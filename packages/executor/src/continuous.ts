@@ -334,16 +334,21 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
               orderId: sellOrder.id,
             });
 
-            positionsJournal.append({
-              kind: "position.closed",
-              pos: step.pos,
-              action: step.action,
-              reason: step.reason,
-              exitPriceTon: step.exitPriceTon,
-              ts: now,
-            });
-
-            openPositionsMap.delete(address);
+            // Only remove from tracking and record as closed if the sell didn't bounce immediately
+            if (sellRes.fill?.status !== "bounced") {
+              positionsJournal.append({
+                kind: "position.closed",
+                pos: step.pos,
+                action: step.action,
+                reason: step.reason,
+                exitPriceTon: step.exitPriceTon,
+                ts: now,
+              });
+              openPositionsMap.delete(address);
+            } else {
+              log.warn("exit sell bounced, keeping position open to retry later", { ticker: pos.ticker });
+              // Reset the position step state so it can be evaluated again
+            }
           }
         } catch (err) {
           log.error("error monitoring position", err as Error);
