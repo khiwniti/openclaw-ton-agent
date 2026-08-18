@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import * as fs from "fs";
 import * as path from "path";
 import { runContinuousExecutor } from "./continuous";
+import { Executor } from "./modes";
+import { EXEC_CONFIG } from "./config";
 import * as os from "os";
 
 test("continuous executor processes gated files and exposes health endpoints", async () => {
@@ -76,3 +78,96 @@ test("continuous executor processes gated files and exposes health endpoints", a
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
+
+test("force-closes positions after 3 consecutive sell bounces", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "stuck-test-"));
+  const gatedDir = path.join(tmpDir, "gated");
+  const ordersOut = path.join(tmpDir, "orders.ndjson");
+  const fillsOut = path.join(tmpDir, "fills.ndjson");
+
+  fs.mkdirSync(gatedDir, { recursive: true });
+
+  const buyOrder = {
+    id: "buy-old",
+    ts: Date.now() - 2 * 60 * 60_000,
+    gatedEnvelopeId: "env-1",
+    side: "buy",
+    source: "radar",
+    mode: "auto",
+    confirmRequired: false,
+    amountTon: 0.5,
+    entryTon: 1.0,
+    stopLossTon: 0.95,
+    takeProfitTon: 1.5,
+    expectedWinTon: 0.15,
+    expectedTokenQty: 0.5,
+    minOutTokenQty: 0.4,
+    slippageBps: 150,
+    tier: "low",
+    rRatio: 2.0,
+    expectedValueTon: 0.1,
+    token: { address: "EQD0vdSA_NedR9uvdbOmDrZt5Xw6aFqcmBD5LFebTnRc4ED", ticker: "STUCK", decimals: 9 },
+    deadlineMs: Date.now() + 60000,
+  };
+  fs.writeFileSync(ordersOut, JSON.stringify(buyOrder) + "\n");
+
+  EXEC_CONFIG.gatesG1G3Ack = true;
+  let submitCalls = 0;
+  const originalSubmit = Executor.prototype.submit;
+  Executor.prototype.submit = async function (order) {
+    submitCalls++;
+    if (order.side === "sell") {
+      return {
+        order,
+        action: "executed",
+        fill: {
+          status: "bounced",
+          txHash: null,
+          filledAmountTon: 0,
+          filledTokenQty: 0,
+          minOutTokenQty: order.minOutTokenQty,
+          slippageBps: order.slippageBps,
+          mode: "auto",
+          reason: "test bounce",
+        },
+        journaled: true,
+      } as any;
+    }
+    return originalSubmit.call(this, order);
+  };
+
+  try {
+    const controller = await runContinuousExecutor({
+      gatedDir,
+      ordersOut,
+      fillsOut,
+      mode: "auto",
+      pollIntervalMs: 200,
+      healthPort: 0,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    controller.stop();
+
+    const positionsJournal = path.join(gatedDir, "positions-mainnet.ndjson");
+    const positions = fs.existsSync(positionsJournal)
+      ? fs.readFileSync(positionsJournal, "utf-8")
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map((l) => JSON.parse(l))
+      : [];
+
+    const closed = positions.filter((p) => p.kind === "position.closed");
+    assert.ok(closed.length >= 1, "expected position to be closed after bouncing");
+    assert.ok(
+      closed.some((c) => (c.reason ?? "").includes("force_cleared")),
+      `expected force_cleared reason, got: ${closed.map((c) => c.reason).join(", ")}`
+    );
+    assert.ok(submitCalls >= 3, `expected at least 3 sell attempts, got ${submitCalls}`);
+  } finally {
+    Executor.prototype.submit = originalSubmit;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+

@@ -334,8 +334,15 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
               orderId: sellOrder.id,
             });
 
-            // Only remove from tracking and record as closed if the sell didn't bounce immediately
-            if (sellRes.fill?.status !== "bounced") {
+            // Check if the bounce is due to a zero balance or manual override to clear stuck positions
+            const isZeroBalance = sellRes.fill?.reason?.includes("zero jetton balance") || sellRes.fill?.reason?.includes("No on-chain jetton balance");
+            const isClearOverride = process.env.CLEAR_STUCK_POSITIONS === "true";
+
+            // Remove from tracking and record as closed if successful or if we know it's already empty
+            if (sellRes.fill?.status !== "bounced" || isZeroBalance || isClearOverride) {
+              if (sellRes.fill?.status === "bounced") {
+                log.info("clearing bounced position due to 0 balance or manual override", { ticker: pos.ticker });
+              }
               positionsJournal.append({
                 kind: "position.closed",
                 pos: step.pos,
@@ -346,8 +353,25 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
               });
               openPositionsMap.delete(address);
             } else {
-              log.warn("exit sell bounced, keeping position open to retry later", { ticker: pos.ticker });
-              // Reset the position step state so it can be evaluated again
+              const bounceCount = (step.pos.bounceCount ?? 0) + 1;
+              const updatedPos = { ...step.pos, bounceCount };
+              openPositionsMap.set(address, updatedPos);
+
+              if (bounceCount >= 3) {
+                log.warn("force-clearing stuck position after consecutive bounces", { ticker: pos.ticker, bounces: bounceCount, reason: sellRes.fill?.reason });
+                positionsJournal.append({
+                  kind: "position.closed",
+                  pos: updatedPos,
+                  action: step.action,
+                  reason: `force_cleared: ${bounceCount} consecutive bounces`,
+                  exitPriceTon: step.exitPriceTon,
+                  ts: now,
+                });
+                openPositionsMap.delete(address);
+              } else {
+                log.warn("exit sell bounced, keeping position open to retry later", { ticker: pos.ticker, reason: sellRes.fill?.reason, bounce: bounceCount });
+                // Reset the position step state so it can be evaluated again
+              }
             }
           }
         } catch (err) {

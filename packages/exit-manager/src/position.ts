@@ -55,6 +55,8 @@ export interface Position {
   partialTakesHit: number[];
   /** laddered exit config (scale-out tranches). */
   ladderExits: LadderExit[];
+  /** number of consecutive exit sell bounces for this position. */
+  bounceCount: number;
 }
 
 export interface LadderExit {
@@ -106,6 +108,7 @@ export function openPosition(input: OpenPositionInput): Position {
     trendState: "unknown",
     partialTakesHit: [],
     ladderExits: input.ladderExits.map(le => ({ ...le, executed: false })),
+    bounceCount: 0,
   };
 }
 

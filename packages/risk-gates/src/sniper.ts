@@ -265,6 +265,7 @@ export class SniperEngine {
       timeStopMs: this.config.timeStopMs!,
       partialTakesHit: [],
       ladderExits: [],
+      bounceCount: 0,
     };
   }
 
