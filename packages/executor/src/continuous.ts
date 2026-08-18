@@ -448,10 +448,78 @@ if (process.argv[1] && process.argv[1].endsWith("continuous.ts")) {
   const fillsOut = process.env.FILLS_OUT ?? "/app/data/fills-mainnet.ndjson";
   const healthPort = Number(process.env.EXEC_HEALTH_PORT ?? "8081");
 
-  void runContinuousExecutor({
-    gatedDir,
-    ordersOut,
-    fillsOut,
-    healthPort,
-  });
+  // ONE-TIME FORCE CLOSE OVERRIDE
+  if (process.env.FORCE_CLOSE_ALL === "true" && fs.existsSync(ordersOut)) {
+    log.info("FORCE_CLOSE_ALL is true, scanning for open positions to liquidate...");
+    const orders = readJournal(ordersOut);
+    const soldTokens = new Set<string>();
+    const openMap = new Map<string, any>();
+
+    for (const o of orders) {
+      if (o && typeof o === "object" && (o as any).side === "sell" && (o as any).token?.address) {
+        soldTokens.add((o as any).token.address);
+      }
+    }
+
+    for (const o of orders) {
+      if (!o || typeof o !== "object") continue;
+      const ord = o as OrderRequest;
+      if (ord.side === "buy" && ord.token?.address && !soldTokens.has(ord.token.address) && !openMap.has(ord.token.address)) {
+        openMap.set(ord.token.address, ord);
+      }
+    }
+
+    log.info(`Found ${openMap.size} un-sold positions. Attempting force close...`);
+    const acton = new ActonWallet({
+      mode: "auto",
+      gatesG1G3Ack: EXEC_CONFIG.gatesG1G3Ack,
+      network: EXEC_CONFIG.network,
+      projectPath: EXEC_CONFIG.acton.projectPath,
+      contractAddress: EXEC_CONFIG.acton.contractAddress,
+      routerAddress: EXEC_CONFIG.acton.routerAddress,
+    });
+
+    (async () => {
+      for (const [addr, ord] of openMap.entries()) {
+        log.info(`force closing ${ord.token.ticker}`);
+        try {
+          const sellOrder: OrderRequest = {
+            id: newId("force"),
+            ts: Date.now(),
+            gatedEnvelopeId: ord.id,
+            source: "cli-force-close",
+            side: "sell",
+            mode: "auto",
+            confirmRequired: false,
+            amountTon: ord.amountTon,
+            entryTon: ord.entryTon || 1.0,
+            stopLossTon: 0,
+            takeProfitTon: 999,
+            expectedWinTon: 0,
+            tier: "low",
+            token: { address: addr, ticker: ord.token.ticker, decimals: 9 },
+            slippageBps: 500, // 5%
+            deadlineMs: Date.now() + 60_000,
+            minOutTokenQty: 0,
+            expectedTokenQty: ord.amountTon / (ord.entryTon || 1.0),
+            rRatio: 1.5,
+            expectedValueTon: 0.1,
+          };
+          const res = await acton.swap(sellOrder);
+          log.info(`force close result for ${ord.token.ticker}`, { status: res.status, reason: res.reason, tx: res.txHash });
+        } catch (e) {
+          log.error(`force close error for ${ord.token.ticker}`, e as Error);
+        }
+      }
+      log.info("force close sequence complete. Continuing with normal boot.");
+      void runContinuousExecutor({ gatedDir, ordersOut, fillsOut, healthPort });
+    })().catch(e => log.error("fatal force close error", e));
+  } else {
+    void runContinuousExecutor({
+      gatedDir,
+      ordersOut,
+      fillsOut,
+      healthPort,
+    });
+  }
 }
