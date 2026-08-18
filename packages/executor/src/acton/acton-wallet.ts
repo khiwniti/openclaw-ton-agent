@@ -11,6 +11,8 @@ export interface ActonWalletOptions extends ActonCommandOptions {
   network: "mainnet" | "testnet";
   balanceTon?: number;
   mnemonic?: string;
+  /** Minimum order size in TON; aligns with executor default */
+  minOrderTon?: number;
   /** Acton project root (maps to ActonCommandOptions.cwd). */
   projectPath?: string;
   /** Optional deployed contract address override. */
@@ -82,6 +84,10 @@ export class ActonWallet implements WalletAdapter {
     }
     if (order.confirmRequired) {
       return this.bounced(order, "ActonWallet: order requires operator confirmation (confirm-first) — surface to trader-ui");
+    }
+    const minOrderTon = this.opts.minOrderTon ?? 0.25;
+    if (order.amountTon < minOrderTon) {
+      return this.bounced(order, `ActonWallet: order amount ${order.amountTon.toFixed(4)} TON below minimum ${minOrderTon} TON`);
     }
 
     const payload = this.toSwapPayload(order);

@@ -37,6 +37,7 @@ export const EXEC_CONFIG = {
   /** confirm-first guardrails (architecture §10). */
   sizeConfirmThresholdTon: num("SIZE_CONFIRM_THRESHOLD_TON", 1.0),
   liveConfirmFirstNTrades: num("LIVE_CONFIRM_FIRST_N_TRADES", 10),
+  minOrderTon: num("MIN_ORDER_TON", 0.25),
 
   /** live execution requires an explicit G1–G3 gate progression acknowledgement. */
   gatesG1G3Ack: bool("GATES_G1_G3_ACK", false),

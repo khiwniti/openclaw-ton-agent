@@ -15,6 +15,8 @@ export interface BuildOrderOptions {
   slippageBps?: number;
   /** ttl in ms; order expires if not executed in time. */
   orderTtlMs?: number;
+  /** minimum order size in TON; recommended default aligns with low-tier ceiling */
+  minOrderTon?: number;
   now?: number;
 }
 
@@ -36,6 +38,10 @@ export function gatedMetaOf(envelope: IngestedEnvelope): { verdict: "pass"; size
 export function buildOrderRequest(envelope: IngestedEnvelope, opts: BuildOrderOptions): OrderRequest | { error: string } {
   const gated = gatedMetaOf(envelope);
   if (!gated) return { error: `envelope ${envelope.id} is not a gated PASS (no usable meta.gate)` };
+
+  if (gated.sizeTon < (opts.minOrderTon ?? 0.25)) {
+    return { error: `order size ${gated.sizeTon.toFixed(4)} TON below minimum ${(opts.minOrderTon ?? 0.25)} TON` };
+  }
 
   const priceTon = envelope.token.priceTon ?? null;
   if (!priceTon || priceTon <= 0) return { error: `envelope ${envelope.id} has no usable quote` };
