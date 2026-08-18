@@ -10,15 +10,17 @@ import { EXEC_CONFIG } from "./config";
 import { buildOrderRequest } from "./order-builder";
 import { Executor } from "./modes";
 import { PaperWallet, ActonWallet } from "./wallet.js";
+import { SimulationWallet } from "./simulation-wallet.js";
+import { TonClient } from "@ton/ton";
 
 import * as fs from "fs";
 import * as path from "path";
 
 const log = createLogger("executor");
 
-function walletForMode(mode: ExecutionMode) {
+function walletForMode(mode: ExecutionMode, client?: TonClient) {
   if (mode !== "auto") return new PaperWallet();
-  return new ActonWallet({
+  const base = new ActonWallet({
     mode: "auto",
     gatesG1G3Ack: EXEC_CONFIG.gatesG1G3Ack,
     network: EXEC_CONFIG.network,
@@ -26,6 +28,15 @@ function walletForMode(mode: ExecutionMode) {
     contractAddress: EXEC_CONFIG.acton.contractAddress,
     routerAddress: EXEC_CONFIG.acton.routerAddress,
   });
+
+  if (mode === "auto" && String(process.env.SIMULATE_BEFORE_EXEC) === "true" && client) {
+    return new SimulationWallet(base, client, {
+      failOpen: process.env.SIMULATE_FAIL_OPEN !== "false",
+      logOnly: process.env.SIMULATE_LOG_ONLY === "true",
+      network: EXEC_CONFIG.network,
+    });
+  }
+  return base;
 }
 
 interface ContinuousExecutorOpts {
@@ -130,7 +141,13 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
     });
   };
 
-  const executor = new Executor({ mode, ordersJournal, fillsJournal, surface, wallet: walletForMode(mode) });
+  const endpoint = EXEC_CONFIG.network === "mainnet"
+    ? "https://toncenter.com/api/v2/jsonRPC"
+    : "https://testnet.toncenter.com/api/v2/jsonRPC";
+  const toncenterApiKey = process.env.TONCENTER_API_KEY || process.env.TON_API_KEY;
+  const client = new TonClient({ endpoint, apiKey: toncenterApiKey });
+
+  const executor = new Executor({ mode, ordersJournal, fillsJournal, surface, wallet: walletForMode(mode, client) });
   const existingOrders = fs.existsSync(opts.ordersOut) ? readJournal(opts.ordersOut) : [];
   const processedEnvIds = new Set<string>();
   for (const o of existingOrders) {
