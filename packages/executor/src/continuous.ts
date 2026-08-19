@@ -2,7 +2,8 @@
  * Continuous executor — file-watcher consumer for gated signals.
  *
  * Watches the gated journal directory for new gated-*.ndjson files,
- * processes them in order, and writes orders/fills journals.
+ * processes them in order, and writes orders/fills journals with asynchronous
+ * non-blocking priority queue management.
  */
 import { Journal, readJournal, validateIngested, createLogger, newId, type OrderRequest, type ExecutionMode } from "@openclaw-ton-agent/shared";
 import { openPosition, stepPosition, type Position } from "@openclaw-ton-agent/exit-manager";
@@ -11,6 +12,7 @@ import { buildOrderRequest } from "./order-builder";
 import { Executor } from "./modes";
 import { PaperWallet, ActonWallet } from "./wallet.js";
 import { SimulationWallet } from "./simulation-wallet.js";
+import { OrderQueueManager } from "./order-queue.js";
 import { TonClient } from "@ton/ton";
 
 import * as fs from "fs";
@@ -157,6 +159,43 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
   const client = new TonClient({ endpoint, apiKey: toncenterApiKey });
 
   const executor = new Executor({ mode, ordersJournal, fillsJournal, surface, wallet: walletForMode(mode, client) });
+  
+  // Initialize Asynchronous Order Queue Manager
+  const orderQueue = new OrderQueueManager(
+    executor,
+    () => openPositionsMap.size < EXEC_CONFIG.maxOpenPositions,
+    (res) => {
+      if ((res.action === "executed" || res.action === "booked") && res.fill?.status !== "bounced") {
+        liveTradeCount++;
+        if (res.order.side === "buy") {
+          const entryPrice = res.order.entryTon && res.order.entryTon > 0 ? res.order.entryTon : 1.0;
+          const stopLossTon = res.order.stopLossTon && res.order.stopLossTon > 0 ? res.order.stopLossTon : entryPrice * 0.95;
+          const takeProfitTon = res.order.takeProfitTon && res.order.takeProfitTon > 0 ? res.order.takeProfitTon : entryPrice * 1.5;
+          const pos = openPosition({
+            orderId: res.order.id,
+            tokenAddress: res.order.token.address,
+            ticker: res.order.token.ticker,
+            entryTon: entryPrice,
+            amountTon: res.order.amountTon,
+            stopLossTon,
+            takeProfitTon,
+            entryTs: res.order.ts || Date.now(),
+            mode: "snipe",
+            feesTon: 0.02,
+            timeStopMs: 30 * 60_000,
+            atrAtEntry: entryPrice * 0.05,
+            swingLow: null,
+            swingHigh: null,
+            ladderExits: [],
+          });
+          openPositionsMap.set(res.order.token.address, pos);
+          positionsJournal.append({ kind: "position.open", pos, ts: Date.now() });
+          log.info("position opened", { ticker: pos.ticker, amountTon: pos.amountTon, entryTon: pos.entryTon, sl: pos.stopLossTon, tp: pos.takeProfitTon });
+        }
+      }
+    }
+  );
+
   const existingOrders = fs.existsSync(opts.ordersOut) ? readJournal(opts.ordersOut) : [];
   const processedEnvIds = new Set<string>();
   for (const o of existingOrders) {
@@ -203,53 +242,28 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
         liveConfirmFirstNTrades: EXEC_CONFIG.liveConfirmFirstNTrades,
         slippageBps: EXEC_CONFIG.slippageBps,
         orderTtlMs: EXEC_CONFIG.orderTtlMs,
+        minOrderTon: EXEC_CONFIG.minOrderTon,
       });
       if ("error" in orderOrErr) {
         log.warn("skipping envelope", { ticker: env.token?.ticker ?? "?", error: orderOrErr.error });
         continue;
       }
-      if (orderOrErr.side === "buy" && openPositionsMap.size >= EXEC_CONFIG.maxOpenPositions) {
-        log.info("max concurrent positions reached, skipping new entry", { activePositions: openPositionsMap.size, maxOpenPositions: EXEC_CONFIG.maxOpenPositions });
-        continue;
-      }
-      const res = await executor.submit(orderOrErr);
-      if ((res.action === "executed" || res.action === "booked") && res.fill?.status !== "bounced") {
-        liveTradeCount++;
-        if (orderOrErr.side === "buy") {
-          const entryPrice = orderOrErr.entryTon && orderOrErr.entryTon > 0 ? orderOrErr.entryTon : 1.0;
-          const stopLossTon = orderOrErr.stopLossTon && orderOrErr.stopLossTon > 0 ? orderOrErr.stopLossTon : entryPrice * 0.95;
-          const takeProfitTon = orderOrErr.takeProfitTon && orderOrErr.takeProfitTon > 0 ? orderOrErr.takeProfitTon : entryPrice * 1.5;
-          const pos = openPosition({
-            orderId: orderOrErr.id,
-            tokenAddress: orderOrErr.token.address,
-            ticker: orderOrErr.token.ticker,
-            entryTon: entryPrice,
-            amountTon: orderOrErr.amountTon,
-            stopLossTon,
-            takeProfitTon,
-            entryTs: orderOrErr.ts || Date.now(),
-            mode: "snipe",
-            feesTon: 0.02,
-            timeStopMs: 30 * 60_000,
-            atrAtEntry: entryPrice * 0.05,
-            swingLow: null,
-            swingHigh: null,
-            ladderExits: [],
-          });
-          openPositionsMap.set(orderOrErr.token.address, pos);
-          positionsJournal.append({ kind: "position.open", pos, ts: Date.now() });
-          log.info("position opened", { ticker: pos.ticker, amountTon: pos.amountTon, entryTon: pos.entryTon, sl: pos.stopLossTon, tp: pos.takeProfitTon });
-        }
-      }
-      fileOrders++;
-      log.info("order processed", {
-        action: res.action,
-        ticker: res.order.token.ticker,
-        amountTon: res.order.amountTon,
-        fillStatus: res.fill?.status ?? "none",
-        orderId: res.order.id,
-        reason: res.fill?.reason,
+
+      // Enqueue buy order in the priority queue (asynchronously managed)
+      void orderQueue.enqueue(orderOrErr, "normal").then((res) => {
+        log.info("order processed from queue", {
+          action: res.action,
+          ticker: res.order.token.ticker,
+          amountTon: res.order.amountTon,
+          fillStatus: res.fill?.status ?? "none",
+          orderId: res.order.id,
+          reason: res.fill?.reason,
+        });
+      }).catch((err) => {
+        log.error("queued buy order execution error", err as Error);
       });
+
+      fileOrders++;
     }
     processedLines.set(fileName, rows.length);
     if (!processedFiles.has(fileName)) {
@@ -258,7 +272,7 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
     }
     stats.totalOrders += fileOrders;
     stats.lastProcessedAt = Date.now();
-    log.info("completed gated file", { fileName, newOrders: fileOrders, totalOrders: stats.totalOrders });
+    log.info("completed gated file ingestion", { fileName, newOrders: fileOrders, totalOrders: stats.totalOrders });
   };
 
   const scanAndProcess = async () => {
@@ -268,7 +282,7 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
 
       const files = fs.readdirSync(opts.gatedDir)
         .filter(f => f.startsWith("gated-") && f.endsWith(".ndjson"))
-        .sort(); // Process in chronological order
+        .sort();
 
       for (const file of files) {
         await processFile(path.join(opts.gatedDir, file));
@@ -278,127 +292,134 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
       log.error("scan failed", e as Error);
     }
 
-    // Monitor and step open positions for automated TP/SL/Time-stop exits
+    // Concurrent non-blocking position monitoring and stepping
     if (openPositionsMap.size > 0) {
       const now = Date.now();
-      for (const [address, pos] of openPositionsMap.entries()) {
-        try {
-          const currentPriceTon = await fetchCurrentPriceTon(address, pos.entryTon);
-          const step = stepPosition(pos, currentPriceTon, now);
-          openPositionsMap.set(address, step.pos);
+      const entries = Array.from(openPositionsMap.entries());
 
-          if (step.action !== "hold") {
-            const holdDurationMin = ((now - pos.entryTs) / 60_000).toFixed(1);
-            log.info("position exit triggered", {
-              ticker: pos.ticker,
-              action: step.action,
-              reason: step.reason,
-              entryTon: pos.entryTon,
-              exitPriceTon: step.exitPriceTon,
-              holdDurationMin,
-            });
-            // If position is dust below min order size, evict immediately
-            if (pos.amountTon < EXEC_CONFIG.minOrderTon) {
-              log.warn("evicting dust position", {
+      await Promise.allSettled(
+        entries.map(async ([address, pos]) => {
+          try {
+            const currentPriceTon = await fetchCurrentPriceTon(address, pos.entryTon);
+            const step = stepPosition(pos, currentPriceTon, now);
+            openPositionsMap.set(address, step.pos);
+
+            if (step.action !== "hold") {
+              const holdDurationMin = ((now - pos.entryTs) / 60_000).toFixed(1);
+              log.info("position exit triggered", {
                 ticker: pos.ticker,
-                amountTon: pos.amountTon,
-                minOrderTon: EXEC_CONFIG.minOrderTon,
+                action: step.action,
                 reason: step.reason,
-              });
-              openPositionsMap.delete(pos.tokenAddress);
-              positionsJournal.append({
-                kind: "position.closed",
-                pos: step.pos,
-                action: step.action,
-                reason: "dust",
+                entryTon: pos.entryTon,
                 exitPriceTon: step.exitPriceTon,
-                ts: now,
+                holdDurationMin,
               });
-              continue;
-            }
 
-            const sellOrder: OrderRequest = {
-              id: newId("ord"),
-              ts: now,
-              gatedEnvelopeId: pos.orderId,
-              source: "exit-manager",
-              side: "sell",
-              mode,
-              confirmRequired: false,
-              amountTon: pos.amountTon,
-              entryTon: pos.entryTon,
-              stopLossTon: pos.stopLossTon,
-              takeProfitTon: pos.takeProfitTon,
-              expectedWinTon: pos.amountTon * 0.3,
-              tier: "low",
-              token: {
-                address: pos.tokenAddress,
-                ticker: pos.ticker,
-                decimals: 9,
-              },
-              slippageBps: EXEC_CONFIG.slippageBps,
-              deadlineMs: now + 60_000,
-              minOutTokenQty: 0,
-              expectedTokenQty: pos.qty,
-              rRatio: 1.5,
-              expectedValueTon: 0.1,
-            };
-            const sellRes = await executor.submit(sellOrder);
-            log.info("sell order processed", {
-              action: sellRes.action,
-              ticker: pos.ticker,
-              fillStatus: sellRes.fill?.status,
-              orderId: sellOrder.id,
-              reason: sellRes.fill?.reason,
-            });
-
-            // Check if bounce is due to zero balance, missing pool, or manual override
-            const isZeroBalance = sellRes.fill?.reason?.includes("zero jetton balance") || sellRes.fill?.reason?.includes("No on-chain jetton balance");
-            const isNoPool = sellRes.fill?.reason?.includes("No active STON.fi") || sellRes.fill?.reason?.includes("No active STON.fi or DeDust pool");
-            const isClearOverride = process.env.CLEAR_STUCK_POSITIONS === "true";
-
-            // Remove from tracking and record as closed if successful or if unsellable / empty
-            if (sellRes.fill?.status !== "bounced" || isZeroBalance || isNoPool || isClearOverride) {
-              if (sellRes.fill?.status === "bounced") {
-                log.info("clearing bounced/unsellable position", { ticker: pos.ticker, reason: sellRes.fill?.reason });
-              }
-              positionsJournal.append({
-                kind: "position.closed",
-                pos: step.pos,
-                action: step.action,
-                reason: sellRes.fill?.status === "bounced" ? (isNoPool ? "unsellable_no_pool" : "zero_balance") : step.reason,
-                exitPriceTon: step.exitPriceTon,
-                ts: now,
-              });
-              openPositionsMap.delete(address);
-            } else {
-              const bounceCount = (step.pos.bounceCount ?? 0) + 1;
-              const updatedPos = { ...step.pos, bounceCount };
-              openPositionsMap.set(address, updatedPos);
-
-              if (bounceCount >= 3) {
-                log.warn("force-clearing stuck position after consecutive bounces", { ticker: pos.ticker, bounces: bounceCount, reason: sellRes.fill?.reason });
+              if (pos.amountTon < EXEC_CONFIG.minOrderTon) {
+                log.warn("evicting dust position", {
+                  ticker: pos.ticker,
+                  amountTon: pos.amountTon,
+                  minOrderTon: EXEC_CONFIG.minOrderTon,
+                  reason: step.reason,
+                });
+                openPositionsMap.delete(pos.tokenAddress);
                 positionsJournal.append({
                   kind: "position.closed",
-                  pos: updatedPos,
+                  pos: step.pos,
                   action: step.action,
-                  reason: `force_cleared: ${bounceCount} consecutive bounces (${sellRes.fill?.reason ?? "unknown"})`,
+                  reason: "dust",
+                  exitPriceTon: step.exitPriceTon,
+                  ts: now,
+                });
+                orderQueue.notifySlotAvailable();
+                return;
+              }
+
+              const sellOrder: OrderRequest = {
+                id: newId("ord"),
+                ts: now,
+                gatedEnvelopeId: pos.orderId,
+                source: "exit-manager",
+                side: "sell",
+                mode,
+                confirmRequired: false,
+                amountTon: pos.amountTon,
+                entryTon: pos.entryTon,
+                stopLossTon: pos.stopLossTon,
+                takeProfitTon: pos.takeProfitTon,
+                expectedWinTon: pos.amountTon * 0.3,
+                tier: "low",
+                token: {
+                  address: pos.tokenAddress,
+                  ticker: pos.ticker,
+                  decimals: 9,
+                },
+                slippageBps: EXEC_CONFIG.slippageBps,
+                deadlineMs: now + 60_000,
+                minOutTokenQty: 0,
+                expectedTokenQty: pos.qty,
+                rRatio: 1.5,
+                expectedValueTon: 0.1,
+              };
+
+              // Enqueue exit with HIGH priority (jumps ahead of buys)
+              const sellRes = await orderQueue.enqueue(sellOrder, "high");
+              log.info("sell order processed", {
+                action: sellRes.action,
+                ticker: pos.ticker,
+                fillStatus: sellRes.fill?.status,
+                orderId: sellOrder.id,
+                reason: sellRes.fill?.reason,
+              });
+
+              const isZeroBalance = sellRes.fill?.reason?.includes("zero jetton balance") || sellRes.fill?.reason?.includes("No on-chain jetton balance");
+              const isNoPool = sellRes.fill?.reason?.includes("No active STON.fi") || sellRes.fill?.reason?.includes("No active STON.fi or DeDust pool");
+              const isClearOverride = process.env.CLEAR_STUCK_POSITIONS === "true";
+
+              if (sellRes.fill?.status !== "bounced" || isZeroBalance || isNoPool || isClearOverride) {
+                if (sellRes.fill?.status === "bounced") {
+                  log.info("clearing bounced/unsellable position", { ticker: pos.ticker, reason: sellRes.fill?.reason });
+                }
+                positionsJournal.append({
+                  kind: "position.closed",
+                  pos: step.pos,
+                  action: step.action,
+                  reason: sellRes.fill?.status === "bounced" ? (isNoPool ? "unsellable_no_pool" : "zero_balance") : step.reason,
                   exitPriceTon: step.exitPriceTon,
                   ts: now,
                 });
                 openPositionsMap.delete(address);
+                orderQueue.notifySlotAvailable();
               } else {
-                log.warn("exit sell bounced, will retry", { ticker: pos.ticker, reason: sellRes.fill?.reason, bounce: bounceCount });
+                const bounceCount = (step.pos.bounceCount ?? 0) + 1;
+                const updatedPos = { ...step.pos, bounceCount };
+                openPositionsMap.set(address, updatedPos);
+
+                if (bounceCount >= 3) {
+                  log.warn("force-clearing stuck position after consecutive bounces", { ticker: pos.ticker, bounces: bounceCount, reason: sellRes.fill?.reason });
+                  positionsJournal.append({
+                    kind: "position.closed",
+                    pos: updatedPos,
+                    action: step.action,
+                    reason: `force_cleared: ${bounceCount} consecutive bounces (${sellRes.fill?.reason ?? "unknown"})`,
+                    exitPriceTon: step.exitPriceTon,
+                    ts: now,
+                  });
+                  openPositionsMap.delete(address);
+                  orderQueue.notifySlotAvailable();
+                } else {
+                  log.warn("exit sell bounced, will retry", { ticker: pos.ticker, reason: sellRes.fill?.reason, bounce: bounceCount });
+                }
               }
             }
+          } catch (err) {
+            log.error("error monitoring position", err as Error);
           }
-        } catch (err) {
-          log.error("error monitoring position", err as Error);
-        }
-      }
+        })
+      );
     }
   };
-  // Initial scan
+
   await scanAndProcess();
 
   // Poll loop
@@ -420,6 +441,7 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
   const isMainRuntime = process.argv[1] && process.argv[1].endsWith("continuous.ts");
   const shutdown = () => {
     isRunning = false;
+    orderQueue.stop();
     if (handle) {
       clearTimeout(handle);
       handle = null;
@@ -427,23 +449,27 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
     healthServer?.close();
   };
   if (isMainRuntime) {
-    for (const sig of ["SIGINT", "SIGTERM"] as const) {
-      process.on(sig, () => {
-        log.info("shutdown signal received", { signal: sig });
-        shutdown();
-        process.exit(0);
-      });
-    }
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
   }
 
-  return { stop: shutdown, stats };
+  return {
+    getStats: () => ({
+      ...stats,
+      uptimeSec: Math.floor((Date.now() - startTime) / 1000),
+    }),
+    stop: shutdown,
+  };
 }
 
-let _cachedTonPriceUsd = 1.0;
+let _cachedTonPriceUsd = 1.30;
 let _lastTonPriceFetch = 0;
+
 async function getTonPriceUsd(): Promise<number> {
   const now = Date.now();
-  if (now - _lastTonPriceFetch < 60_000 && _cachedTonPriceUsd > 0) return _cachedTonPriceUsd;
+  if (now - _lastTonPriceFetch < 60_000 && _cachedTonPriceUsd > 0) {
+    return _cachedTonPriceUsd;
+  }
   try {
     const res = await fetch("https://api.ston.fi/v1/assets/EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c", {
       signal: AbortSignal.timeout(4_000),
@@ -457,11 +483,10 @@ async function getTonPriceUsd(): Promise<number> {
         return p;
       }
     }
-  } catch {
-    // use cached
-  }
+  } catch {}
   return _cachedTonPriceUsd;
 }
+
 async function fetchCurrentPriceTon(address: string, fallbackPriceTon: number): Promise<number> {
   if (process.env.NODE_ENV === "test" || !address || address.startsWith("EQD0vdSA")) {
     return fallbackPriceTon;
@@ -505,111 +530,31 @@ async function fetchCurrentPriceTon(address: string, fallbackPriceTon: number): 
 function createHealthServer(port: number, getStats: () => HealthStats) {
   const http = require("http");
   const server = http.createServer((req: any, res: any) => {
-    if (req.url === "/health" || req.url === "/health/executor") {
-      const stats = getStats();
-      const ok = stats.lastError === null;
-      res.writeHead(ok ? 200 : 503, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok, ...stats }));
-    } else if (req.url === "/metrics" || req.url === "/metrics/executor") {
-      const stats = getStats();
-      res.writeHead(200, { "Content-Type": "text/plain" });
-      res.end([
-        `executor_up 1`,
-        `executor_processed_files_total ${stats.processedFiles}`,
-        `executor_total_orders_total ${stats.totalOrders}`,
-        `executor_uptime_seconds ${stats.uptimeSec}`,
-        `executor_last_processed_timestamp ${stats.lastProcessedAt ?? 0}`,
-        `executor_last_error ${stats.lastError ? 1 : 0}`,
-      ].join("\n") + "\n");
-    } else {
-      res.writeHead(404);
-      res.end("Not found");
+    if (req.url === "/health" || req.url === "/health/ready") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "ok", ...getStats() }));
+      return;
     }
+    res.writeHead(404);
+    res.end();
   });
-  server.listen(port, "0.0.0.0");
-  log.info("health server listening", { port });
+  server.listen(port, "0.0.0.0", () => {
+    log.info("health server listening", { port });
+  });
   return server;
 }
 
-// CLI entry
 if (process.argv[1] && process.argv[1].endsWith("continuous.ts")) {
-  const gatedDir = process.env.GATED_DIR ?? "/app/data";
-  const ordersOut = process.env.ORDERS_OUT ?? "/app/data/orders-mainnet.ndjson";
-  const fillsOut = process.env.FILLS_OUT ?? "/app/data/fills-mainnet.ndjson";
+  const dataDir = process.env.DATA_DIR || process.env.GATED_DIR || "./data";
+  const network = process.env.TON_NETWORK || "testnet";
+  const ordersOut = process.env.ORDERS_OUT || path.join(dataDir, `orders-${network}.ndjson`);
+  const fillsOut = process.env.FILLS_OUT || path.join(dataDir, `fills-${network}.ndjson`);
   const healthPort = Number(process.env.EXEC_HEALTH_PORT ?? "8081");
 
-  // ONE-TIME FORCE CLOSE OVERRIDE
-  if (process.env.FORCE_CLOSE_ALL === "true" && fs.existsSync(ordersOut)) {
-    log.info("FORCE_CLOSE_ALL is true, scanning for open positions to liquidate...");
-    const orders = readJournal(ordersOut);
-    const soldTokens = new Set<string>();
-    const openMap = new Map<string, any>();
-
-    for (const o of orders) {
-      if (o && typeof o === "object" && (o as any).side === "sell" && (o as any).token?.address) {
-        soldTokens.add((o as any).token.address);
-      }
-    }
-
-    for (const o of orders) {
-      if (!o || typeof o !== "object") continue;
-      const ord = o as OrderRequest;
-      if (ord.side === "buy" && ord.token?.address && !soldTokens.has(ord.token.address) && !openMap.has(ord.token.address)) {
-        openMap.set(ord.token.address, ord);
-      }
-    }
-
-    log.info(`Found ${openMap.size} un-sold positions. Attempting force close...`);
-    const acton = new ActonWallet({
-      mode: "auto",
-      gatesG1G3Ack: EXEC_CONFIG.gatesG1G3Ack,
-      network: EXEC_CONFIG.network,
-      projectPath: EXEC_CONFIG.acton.projectPath,
-      contractAddress: EXEC_CONFIG.acton.contractAddress,
-      routerAddress: EXEC_CONFIG.acton.routerAddress,
-    });
-
-    (async () => {
-      for (const [addr, ord] of openMap.entries()) {
-        log.info(`force closing ${ord.token.ticker}`);
-        try {
-          const sellOrder: OrderRequest = {
-            id: newId("force"),
-            ts: Date.now(),
-            gatedEnvelopeId: ord.id,
-            source: "cli-force-close",
-            side: "sell",
-            mode: "auto",
-            confirmRequired: false,
-            amountTon: ord.amountTon,
-            entryTon: ord.entryTon || 1.0,
-            stopLossTon: 0,
-            takeProfitTon: 999,
-            expectedWinTon: 0,
-            tier: "low",
-            token: { address: addr, ticker: ord.token.ticker, decimals: 9 },
-            slippageBps: 500, // 5%
-            deadlineMs: Date.now() + 60_000,
-            minOutTokenQty: 0,
-            expectedTokenQty: ord.amountTon / (ord.entryTon || 1.0),
-            rRatio: 1.5,
-            expectedValueTon: 0.1,
-          };
-          const res = await acton.swap(sellOrder);
-          log.info(`force close result for ${ord.token.ticker}`, { status: res.status, reason: res.reason, tx: res.txHash });
-        } catch (e) {
-          log.error(`force close error for ${ord.token.ticker}`, e as Error);
-        }
-      }
-      log.info("force close sequence complete. Continuing with normal boot.");
-      void runContinuousExecutor({ gatedDir, ordersOut, fillsOut, healthPort });
-    })().catch(e => log.error("fatal force close error", e));
-  } else {
-    void runContinuousExecutor({
-      gatedDir,
-      ordersOut,
-      fillsOut,
-      healthPort,
-    });
-  }
+  runContinuousExecutor({
+    gatedDir: dataDir,
+    ordersOut,
+    fillsOut,
+    healthPort,
+  });
 }

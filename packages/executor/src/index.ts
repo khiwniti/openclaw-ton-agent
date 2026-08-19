@@ -17,6 +17,7 @@ import { PaperWallet, TonMcpWallet, ActonWallet } from "./wallet.js";
 
 export { EXEC_CONFIG, buildOrderRequest, Executor, PaperWallet, TonMcpWallet, ActonWallet };
 export * from "./acton/router.js";
+export * from "./order-queue.js";
 
 
 function arg(name: string): string | undefined {

@@ -39,8 +39,8 @@ export function buildOrderRequest(envelope: IngestedEnvelope, opts: BuildOrderOp
   const gated = gatedMetaOf(envelope);
   if (!gated) return { error: `envelope ${envelope.id} is not a gated PASS (no usable meta.gate)` };
 
-  if (gated.sizeTon < (opts.minOrderTon ?? 0.20)) {
-    return { error: `order size ${gated.sizeTon.toFixed(4)} TON below minimum ${(opts.minOrderTon ?? 0.20)} TON` };
+  if (gated.sizeTon < (opts.minOrderTon ?? 0.10)) {
+    return { error: `order size ${gated.sizeTon.toFixed(4)} TON below minimum ${(opts.minOrderTon ?? 0.10)} TON` };
   }
 
   const priceTon = envelope.token.priceTon ?? null;
