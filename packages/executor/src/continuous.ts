@@ -251,6 +251,9 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
 
       // Enqueue buy order in the priority queue (asynchronously managed)
       void orderQueue.enqueue(orderOrErr, "normal").then((res) => {
+        if (res.fill?.status === "bounced" && env.id) {
+          processedEnvIds.delete(env.id);
+        }
         log.info("order processed from queue", {
           action: res.action,
           ticker: res.order.token.ticker,
@@ -260,6 +263,7 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
           reason: res.fill?.reason,
         });
       }).catch((err) => {
+        if (env.id) processedEnvIds.delete(env.id);
         log.error("queued buy order execution error", err as Error);
       });
 
