@@ -199,8 +199,8 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
         log.warn("skipping envelope", { ticker: env.token?.ticker ?? "?", error: orderOrErr.error });
         continue;
       }
-      if (orderOrErr.side === "buy" && openPositionsMap.size >= 3) {
-        log.info("max concurrent positions reached, skipping new entry", { activePositions: openPositionsMap.size });
+      if (orderOrErr.side === "buy" && openPositionsMap.size >= EXEC_CONFIG.maxOpenPositions) {
+        log.info("max concurrent positions reached, skipping new entry", { activePositions: openPositionsMap.size, maxOpenPositions: EXEC_CONFIG.maxOpenPositions });
         continue;
       }
       const res = await executor.submit(orderOrErr);
@@ -218,7 +218,7 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
             amountTon: orderOrErr.amountTon,
             stopLossTon,
             takeProfitTon,
-            entryTs: Date.now(),
+            entryTs: orderOrErr.ts || Date.now(),
             mode: "snipe",
             feesTon: 0.02,
             timeStopMs: 30 * 60_000,
@@ -274,41 +274,37 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
       const now = Date.now();
       for (const [address, pos] of openPositionsMap.entries()) {
         try {
-          let currentPriceTon = pos.entryTon;
-          try {
-            const res = await fetch(`https://api.ston.fi/v1/assets/${address}`, { signal: AbortSignal.timeout(4000) });
-            if (res.ok) {
-              const data = (await res.json()) as { asset?: { dex_usd_price?: string; third_party_usd_price?: string } };
-              const priceUsd = Number(data.asset?.dex_usd_price ?? data.asset?.third_party_usd_price);
-              if (Number.isFinite(priceUsd) && priceUsd > 0) {
-                currentPriceTon = priceUsd / (await getTonPriceUsd());
-              }
-            }
-          } catch {
-            // use fallback
-          }
-
+          const currentPriceTon = await fetchCurrentPriceTon(address, pos.entryTon);
           const step = stepPosition(pos, currentPriceTon, now);
           openPositionsMap.set(address, step.pos);
 
           if (step.action !== "hold") {
+            const holdDurationMin = ((now - pos.entryTs) / 60_000).toFixed(1);
             log.info("position exit triggered", {
               ticker: pos.ticker,
               action: step.action,
               reason: step.reason,
               entryTon: pos.entryTon,
               exitPriceTon: step.exitPriceTon,
+              holdDurationMin,
             });
-
+            // If position is dust below min order size, evict immediately
             if (pos.amountTon < EXEC_CONFIG.minOrderTon) {
-              log.warn("position below min order size, closing as dust", {
+              log.warn("evicting dust position", {
                 ticker: pos.ticker,
                 amountTon: pos.amountTon,
                 minOrderTon: EXEC_CONFIG.minOrderTon,
                 reason: step.reason,
               });
               openPositionsMap.delete(pos.tokenAddress);
-              positionsJournal.append({ kind: "position.closed", pos, ts: Date.now(), reason: "dust" });
+              positionsJournal.append({
+                kind: "position.closed",
+                pos: step.pos,
+                action: step.action,
+                reason: "dust",
+                exitPriceTon: step.exitPriceTon,
+                ts: now,
+              });
               continue;
             }
 
@@ -344,22 +340,24 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
               ticker: pos.ticker,
               fillStatus: sellRes.fill?.status,
               orderId: sellOrder.id,
+              reason: sellRes.fill?.reason,
             });
 
-            // Check if the bounce is due to a zero balance or manual override to clear stuck positions
+            // Check if bounce is due to zero balance, missing pool, or manual override
             const isZeroBalance = sellRes.fill?.reason?.includes("zero jetton balance") || sellRes.fill?.reason?.includes("No on-chain jetton balance");
+            const isNoPool = sellRes.fill?.reason?.includes("No active STON.fi") || sellRes.fill?.reason?.includes("No active STON.fi or DeDust pool");
             const isClearOverride = process.env.CLEAR_STUCK_POSITIONS === "true";
 
-            // Remove from tracking and record as closed if successful or if we know it's already empty
-            if (sellRes.fill?.status !== "bounced" || isZeroBalance || isClearOverride) {
+            // Remove from tracking and record as closed if successful or if unsellable / empty
+            if (sellRes.fill?.status !== "bounced" || isZeroBalance || isNoPool || isClearOverride) {
               if (sellRes.fill?.status === "bounced") {
-                log.info("clearing bounced position due to 0 balance or manual override", { ticker: pos.ticker });
+                log.info("clearing bounced/unsellable position", { ticker: pos.ticker, reason: sellRes.fill?.reason });
               }
               positionsJournal.append({
                 kind: "position.closed",
                 pos: step.pos,
                 action: step.action,
-                reason: step.reason,
+                reason: sellRes.fill?.status === "bounced" ? (isNoPool ? "unsellable_no_pool" : "zero_balance") : step.reason,
                 exitPriceTon: step.exitPriceTon,
                 ts: now,
               });
@@ -375,14 +373,13 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
                   kind: "position.closed",
                   pos: updatedPos,
                   action: step.action,
-                  reason: `force_cleared: ${bounceCount} consecutive bounces`,
+                  reason: `force_cleared: ${bounceCount} consecutive bounces (${sellRes.fill?.reason ?? "unknown"})`,
                   exitPriceTon: step.exitPriceTon,
                   ts: now,
                 });
                 openPositionsMap.delete(address);
               } else {
-                log.warn("exit sell bounced, keeping position open to retry later", { ticker: pos.ticker, reason: sellRes.fill?.reason, bounce: bounceCount });
-                // Reset the position step state so it can be evaluated again
+                log.warn("exit sell bounced, will retry", { ticker: pos.ticker, reason: sellRes.fill?.reason, bounce: bounceCount });
               }
             }
           }
@@ -396,11 +393,16 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
   await scanAndProcess();
 
   // Poll loop
-  let handle: NodeJS.Timeout;
+  let handle: NodeJS.Timeout | null = null;
+  let isRunning = true;
   const scheduleNext = () => {
+    if (!isRunning) return;
     handle = setTimeout(async () => {
+      if (!isRunning) return;
       await scanAndProcess();
-      scheduleNext();
+      if (isRunning) {
+        scheduleNext();
+      }
     }, pollIntervalMs);
   };
   scheduleNext();
@@ -408,7 +410,11 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
   // Handle signals only when running as the main runtime entrypoint
   const isMainRuntime = process.argv[1] && process.argv[1].endsWith("continuous.ts");
   const shutdown = () => {
-    clearTimeout(handle);
+    isRunning = false;
+    if (handle) {
+      clearTimeout(handle);
+      handle = null;
+    }
     healthServer?.close();
   };
   if (isMainRuntime) {
@@ -446,6 +452,45 @@ async function getTonPriceUsd(): Promise<number> {
     // use cached
   }
   return _cachedTonPriceUsd;
+}
+async function fetchCurrentPriceTon(address: string, fallbackPriceTon: number): Promise<number> {
+  if (process.env.NODE_ENV === "test" || !address || address.startsWith("EQD0vdSA")) {
+    return fallbackPriceTon;
+  }
+  // 1. Try STON.fi API
+  try {
+    const res = await fetch(`https://api.ston.fi/v1/assets/${address}`, {
+      signal: AbortSignal.timeout(3_000),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { asset?: { dex_usd_price?: string; third_party_usd_price?: string } };
+      const priceUsd = Number(data.asset?.dex_usd_price ?? data.asset?.third_party_usd_price);
+      if (Number.isFinite(priceUsd) && priceUsd > 0) {
+        const tonPrice = await getTonPriceUsd();
+        return priceUsd / Math.max(tonPrice, 0.001);
+      }
+    }
+  } catch {}
+
+  // 2. Try DeDust API
+  try {
+    const res = await fetch("https://api.dedust.io/v2/pools", {
+      signal: AbortSignal.timeout(3_000),
+    });
+    if (res.ok) {
+      const pools = (await res.json()) as Array<{ assets: Array<{ type: string; address?: string }>; lastPrice?: string }>;
+      if (Array.isArray(pools)) {
+        const pool = pools.find((p) => p.assets.some((a) => a.address === address));
+        if (pool && pool.lastPrice) {
+          const p = Number(pool.lastPrice);
+          if (Number.isFinite(p) && p > 0) return p;
+        }
+      }
+    }
+  } catch {}
+
+  // 3. Fallback to entry price
+  return fallbackPriceTon;
 }
 
 function createHealthServer(port: number, getStats: () => HealthStats) {

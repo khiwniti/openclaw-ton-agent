@@ -56,8 +56,9 @@ export function startScanner(
 
   // TTL-bounded: a candidate is suppressed for a window, not forever, so
   // changed audits/liquidity are re-evaluated and memory stays bounded.
+  const scanSeenTtlMs = Number(process.env.SCAN_SEEN_TTL_MS ?? 120_000);
   const seen = new SeenCache({
-    ttlMs: Math.max(intervalMs * 10, 10 * 60_000),
+    ttlMs: Number.isFinite(scanSeenTtlMs) && scanSeenTtlMs > 0 ? scanSeenTtlMs : Math.max(intervalMs * 2, 2 * 60_000),
     maxEntries: 10_000,
   });
 

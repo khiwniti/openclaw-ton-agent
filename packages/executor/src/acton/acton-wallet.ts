@@ -85,7 +85,7 @@ export class ActonWallet implements WalletAdapter {
     if (order.confirmRequired) {
       return this.bounced(order, "ActonWallet: order requires operator confirmation (confirm-first) — surface to trader-ui");
     }
-    const minOrderTon = this.opts.minOrderTon ?? 0.25;
+    const minOrderTon = this.opts.minOrderTon ?? 0.20;
     if (order.amountTon < minOrderTon) {
       return this.bounced(order, `ActonWallet: order amount ${order.amountTon.toFixed(4)} TON below minimum ${minOrderTon} TON`);
     }
@@ -217,6 +217,7 @@ export class ActonWallet implements WalletAdapter {
       const log = createLogger("acton-wallet");
       log.info("wallet resolved", { address: wallet.address.toString(), seqno: startSeqno });
       const stateInit = startSeqno === 0 ? wallet.init : undefined;
+
       const routerAddrStr = this.opts.routerAddress || (this.opts.network === "testnet" ? STONFI_ROUTER_TESTNET : STONFI_ROUTER_MAINNET);
       const pTonMinterStr = this.opts.network === "testnet" ? STONFI_PTON_TESTNET : STONFI_PTON_MAINNET;
       const routerAddr = Address.parse(this.safeAddress(routerAddrStr));
@@ -235,137 +236,235 @@ export class ActonWallet implements WalletAdapter {
           };
         }
       }
+
+      // Determine active DEX: STON.fi vs DeDust
+      let routerPtonWallet: Address;
+      try {
+        const ptonRes = await client.runMethod(pTonMinterAddr, "get_wallet_address", [
+          { type: "slice", cell: beginCell().storeAddress(routerAddr).endCell() }
+        ]);
+        routerPtonWallet = ptonRes.stack.readAddress();
+      } catch {
+        routerPtonWallet = Address.parse("EQARULUYsmJq1RiZ-YiH-IJLcAZUVkVff-KBPwEmmaQGH6aC");
+      }
+
+      let routerJettonWallet: Address;
+      try {
+        const rRes = await client.runMethod(jettonMasterAddr, "get_wallet_address", [
+          { type: "slice", cell: beginCell().storeAddress(routerAddr).endCell() }
+        ]);
+        routerJettonWallet = rRes.stack.readAddress();
+      } catch {
+        routerJettonWallet = jettonMasterAddr;
+      }
+
+      let isStonfiActive = false;
+      try {
+        const poolRes = await client.runMethod(routerAddr, "get_pool_address", [
+          { type: "slice", cell: beginCell().storeAddress(routerPtonWallet).endCell() },
+          { type: "slice", cell: beginCell().storeAddress(routerJettonWallet).endCell() }
+        ]);
+        const poolAddr = poolRes.stack.readAddress();
+        if (poolAddr && poolAddr.toString() !== "EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c") {
+          const poolState = await client.getContractState(poolAddr);
+          isStonfiActive = poolState.state === "active";
+        }
+      } catch {
+        isStonfiActive = false;
+      }
+
+      // Check DeDust pool if STON.fi is not active
+      let isDedustActive = false;
+      let dedustPoolAddrStr: string | null = null;
+      if (!isStonfiActive && this.opts.network === "mainnet") {
+        try {
+          const dedustFactory = Address.parse("EQBfBWT7X2BHg9tXAxzhz2aKiNTU1tpt5NsiK0uSDW_YAJ67");
+          const tonAsset = Address.parse("EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c");
+          const poolRes = await client.runMethod(dedustFactory, "get_pool", [
+            {
+              type: "slice",
+              cell: beginCell().storeUint(0, 32).storeAddress(tonAsset).storeAddress(jettonMasterAddr).endCell()
+            }
+          ]);
+          const dPoolAddr = poolRes.stack.readAddress();
+          if (dPoolAddr && dPoolAddr.toString() !== "EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c") {
+            const dPoolState = await client.getContractState(dPoolAddr);
+            if (dPoolState.state === "active") {
+              isDedustActive = true;
+              dedustPoolAddrStr = dPoolAddr.toString();
+            }
+          }
+        } catch {
+          isDedustActive = false;
+        }
+      }
+
+      if (!isStonfiActive && !isDedustActive && this.opts.network === "mainnet") {
+        return { ok: false, error: `No active STON.fi or DeDust pool found for token ${payload.jettonMaster}` };
+      }
+
       let targetAddr: Address;
       let msgValue: bigint;
       let body;
 
-      if (payload.side === "buy") {
-        // Resolve router pTON wallet (the destination for native TON swaps on Ston.fi)
-        let routerPtonWallet: Address;
-        try {
-          const ptonRes = await client.runMethod(pTonMinterAddr, "get_wallet_address", [
-            { type: "slice", cell: beginCell().storeAddress(routerAddr).endCell() }
-          ]);
-          routerPtonWallet = ptonRes.stack.readAddress();
-        } catch {
-          routerPtonWallet = Address.parse("EQARULUYsmJq1RiZ-YiH-IJLcAZUVkVff-KBPwEmmaQGH6aC");
-        }
-
-        // Resolve router Jetton wallet for target token
-        let routerJettonWallet: Address;
-        try {
-          const rRes = await client.runMethod(jettonMasterAddr, "get_wallet_address", [
-            { type: "slice", cell: beginCell().storeAddress(routerAddr).endCell() }
-          ]);
-          routerJettonWallet = rRes.stack.readAddress();
-        } catch {
-          routerJettonWallet = jettonMasterAddr;
-        }
-
-        const forwardPayload = beginCell()
-          .storeUint(0x25938561, 32) // Ston.fi V1 SWAP opcode
-          .storeAddress(routerJettonWallet)
-          .storeCoins(minOutNano)
-          .storeAddress(wallet.address)
-          .storeUint(0, 1) // no referral
-          .endCell();
-
-        body = beginCell()
-          .storeUint(0x0f8a7ea5, 32) // jetton transfer opcode
-          .storeUint(Date.now(), 64)
-          .storeCoins(swapAmountNano)
-          .storeAddress(routerAddr)
-          .storeAddress(wallet.address)
-          .storeBit(0)
-          .storeCoins(toNano("0.12")) // forward_ton_amount for router execution gas
-          .storeBit(1)
-          .storeRef(forwardPayload)
-          .endCell();
-        // Verify STON.fi pool exists and is active on-chain before broadcasting
-        let isPoolActive = false;
-        try {
-          const poolRes = await client.runMethod(routerAddr, "get_pool_address", [
-            { type: "slice", cell: beginCell().storeAddress(routerPtonWallet).endCell() },
-            { type: "slice", cell: beginCell().storeAddress(routerJettonWallet).endCell() }
-          ]);
-          const poolAddr = poolRes.stack.readAddress();
-          if (poolAddr && poolAddr.toString() !== "EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c") {
-            const poolState = await client.getContractState(poolAddr);
-            isPoolActive = poolState.state === "active";
+      if (isDedustActive && dedustPoolAddrStr) {
+        // DeDust execution path
+        const dedustPool = Address.parse(dedustPoolAddrStr);
+        if (payload.side === "buy") {
+          targetAddr = dedustPool;
+          msgValue = swapAmountNano + toNano("0.25");
+          body = beginCell()
+            .storeUint(0xea06185d, 32) // DeDust native swap opcode
+            .storeUint(BigInt(Date.now()), 64)
+            .storeCoins(swapAmountNano)
+            .storeAddress(dedustPool)
+            .storeUint(0, 1)
+            .storeCoins(minOutNano)
+            .storeMaybeRef(null)
+            .storeRef(
+              beginCell()
+                .storeUint(0, 32)
+                .storeAddress(wallet.address)
+                .storeAddress(null)
+                .storeMaybeRef(null)
+                .storeMaybeRef(null)
+                .endCell()
+            )
+            .endCell();
+        } else {
+          // DeDust sell path
+          let userJettonWallet: Address;
+          try {
+            const jRes = await client.runMethod(jettonMasterAddr, "get_wallet_address", [
+              { type: "slice", cell: beginCell().storeAddress(wallet.address).endCell() }
+            ]);
+            userJettonWallet = jRes.stack.readAddress();
+          } catch {
+            userJettonWallet = jettonMasterAddr;
           }
-        } catch {
-          isPoolActive = false;
-        }
 
-        if (!isPoolActive && this.opts.network === "mainnet") {
-          return { ok: false, error: `No active STON.fi pool found for token ${payload.jettonMaster}` };
-        }
+          let actualJettonBalanceNano = 0n;
+          try {
+            const balRes = await client.runMethod(userJettonWallet, "get_wallet_data");
+            actualJettonBalanceNano = balRes.stack.readBigNumber();
+          } catch {}
 
-        targetAddr = routerPtonWallet;
-        msgValue = swapAmountNano + toNano("0.16");
+          if (actualJettonBalanceNano <= 0n) {
+            return { ok: false, error: "No on-chain jetton balance available to sell" };
+          }
+
+          const requestedNano = BigInt(payload.jettonAmountNano ?? "0");
+          const sellAmountNano = requestedNano > 0n && requestedNano < actualJettonBalanceNano
+            ? requestedNano
+            : actualJettonBalanceNano;
+
+          const forwardPayload = beginCell()
+            .storeUint(0xe3a0d482, 32) // DeDust jetton swap opcode
+            .storeAddress(dedustPool)
+            .storeCoins(minOutNano)
+            .storeMaybeRef(beginCell().storeAddress(wallet.address).endCell())
+            .endCell();
+
+          body = beginCell()
+            .storeUint(0x0f8a7ea5, 32) // standard jetton transfer opcode
+            .storeUint(Date.now(), 64)
+            .storeCoins(sellAmountNano)
+            .storeAddress(dedustPool)
+            .storeAddress(wallet.address)
+            .storeBit(0)
+            .storeCoins(toNano("0.25"))
+            .storeBit(1)
+            .storeRef(forwardPayload)
+            .endCell();
+
+          targetAddr = userJettonWallet;
+          msgValue = toNano("0.35");
+        }
       } else {
-        // Resolve user jetton wallet
-        let userJettonWallet: Address;
-        try {
-          const jRes = await client.runMethod(jettonMasterAddr, "get_wallet_address", [
-            { type: "slice", cell: beginCell().storeAddress(wallet.address).endCell() }
-          ]);
-          userJettonWallet = jRes.stack.readAddress();
-        } catch {
-          userJettonWallet = jettonMasterAddr;
+        // STON.fi execution path
+        if (payload.side === "buy") {
+          const forwardPayload = beginCell()
+            .storeUint(0x25938561, 32) // Ston.fi V1 SWAP opcode
+            .storeAddress(routerJettonWallet)
+            .storeCoins(minOutNano)
+            .storeAddress(wallet.address)
+            .storeUint(0, 1) // no referral
+            .endCell();
+
+          body = beginCell()
+            .storeUint(0x0f8a7ea5, 32) // jetton transfer opcode
+            .storeUint(Date.now(), 64)
+            .storeCoins(swapAmountNano)
+            .storeAddress(routerAddr)
+            .storeAddress(wallet.address)
+            .storeBit(0)
+            .storeCoins(toNano("0.12")) // forward_ton_amount for router execution gas
+            .storeBit(1)
+            .storeRef(forwardPayload)
+            .endCell();
+
+          targetAddr = routerPtonWallet;
+          msgValue = swapAmountNano + toNano("0.16");
+        } else {
+          // STON.fi sell path
+          let userJettonWallet: Address;
+          try {
+            const jRes = await client.runMethod(jettonMasterAddr, "get_wallet_address", [
+              { type: "slice", cell: beginCell().storeAddress(wallet.address).endCell() }
+            ]);
+            userJettonWallet = jRes.stack.readAddress();
+          } catch {
+            userJettonWallet = jettonMasterAddr;
+          }
+
+          let actualJettonBalanceNano = 0n;
+          try {
+            const balRes = await client.runMethod(userJettonWallet, "get_wallet_data");
+            actualJettonBalanceNano = balRes.stack.readBigNumber();
+          } catch {}
+
+          if (actualJettonBalanceNano <= 0n) {
+            return { ok: false, error: "No on-chain jetton balance available to sell" };
+          }
+
+          const requestedNano = BigInt(payload.jettonAmountNano ?? "0");
+          const sellAmountNano = requestedNano > 0n && requestedNano < actualJettonBalanceNano
+            ? requestedNano
+            : actualJettonBalanceNano;
+
+          let ptonWalletForSell: Address;
+          try {
+            const pRes = await client.runMethod(pTonMinterAddr, "get_wallet_address", [
+              { type: "slice", cell: beginCell().storeAddress(routerAddr).endCell() }
+            ]);
+            ptonWalletForSell = pRes.stack.readAddress();
+          } catch {
+            ptonWalletForSell = pTonMinterAddr;
+          }
+
+          const forwardPayload = beginCell()
+            .storeUint(0x25938561, 32) // Ston.fi V1 SWAP opcode
+            .storeAddress(ptonWalletForSell)
+            .storeCoins(minOutNano)
+            .storeAddress(wallet.address)
+            .storeUint(0, 1)
+            .endCell();
+
+          body = beginCell()
+            .storeUint(0x0f8a7ea5, 32)
+            .storeUint(Date.now(), 64)
+            .storeCoins(sellAmountNano)
+            .storeAddress(routerAddr)
+            .storeAddress(wallet.address)
+            .storeBit(0)
+            .storeCoins(toNano("0.14"))
+            .storeBit(1)
+            .storeRef(forwardPayload)
+            .endCell();
+
+          targetAddr = userJettonWallet;
+          msgValue = toNano("0.20");
         }
-
-        // Query actual on-chain jetton balance
-        let actualJettonBalanceNano = 0n;
-        try {
-          const balRes = await client.runMethod(userJettonWallet, "get_wallet_data");
-          actualJettonBalanceNano = balRes.stack.readBigNumber();
-        } catch {
-          // fallback
-        }
-
-        if (actualJettonBalanceNano <= 0n) {
-          return { ok: false, error: "No on-chain jetton balance available to sell" };
-        }
-
-        const requestedNano = BigInt(payload.jettonAmountNano ?? "0");
-        const sellAmountNano = requestedNano > 0n && requestedNano < actualJettonBalanceNano
-          ? requestedNano
-          : actualJettonBalanceNano;
-
-        // Resolve router pTON wallet
-        let routerPtonWallet: Address;
-        try {
-          const pRes = await client.runMethod(pTonMinterAddr, "get_wallet_address", [
-            { type: "slice", cell: beginCell().storeAddress(routerAddr).endCell() }
-          ]);
-          routerPtonWallet = pRes.stack.readAddress();
-        } catch {
-          routerPtonWallet = pTonMinterAddr;
-        }
-
-        const forwardPayload = beginCell()
-          .storeUint(0x25938561, 32) // Ston.fi V1 SWAP opcode
-          .storeAddress(routerPtonWallet)
-          .storeCoins(minOutNano)
-          .storeAddress(wallet.address)
-          .storeUint(0, 1)
-          .endCell();
-
-        body = beginCell()
-          .storeUint(0x0f8a7ea5, 32)
-          .storeUint(Date.now(), 64)
-          .storeCoins(sellAmountNano)
-          .storeAddress(routerAddr)
-          .storeAddress(wallet.address)
-          .storeBit(0)
-          .storeCoins(toNano("0.14"))
-          .storeBit(1)
-          .storeRef(forwardPayload)
-          .endCell();
-
-        targetAddr = userJettonWallet;
-        msgValue = toNano("0.20");
       }
 
       const swapMsg = internal({
@@ -399,9 +498,9 @@ export class ActonWallet implements WalletAdapter {
         throw lastErr ?? new Error("broadcast failed after retries");
       }
 
-      // Sequential lock wait: poll until on-chain seqno increments
+      // Sequential lock wait: poll until on-chain seqno increments (max 20s for fast unblocking)
       const pollStart = Date.now();
-      const timeoutMs = 45_000;
+      const timeoutMs = 20_000;
       while (Date.now() - pollStart < timeoutMs) {
         await new Promise<void>((resolve) => setTimeout(resolve, 2000));
         try {

@@ -1,0 +1,146 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://ultimate-pi.local/.pi/harness/specs/round-result.schema.json",
+	"title": "RoundResult",
+	"description": "One structured debate round with strict budget accounting.",
+	"type": "object",
+	"additionalProperties": false,
+	"required": [
+		"schema_version",
+		"contract_version",
+		"run_id",
+		"debate_id",
+		"round_index",
+		"participants",
+		"claims",
+		"rebuttals",
+		"evidence_refs",
+		"token_usage",
+		"budget_profile",
+		"consensus_delta"
+	],
+	"properties": {
+		"schema_version": {
+			"type": "string",
+			"const": "1.0.0"
+		},
+		"contract_version": {
+			"type": "string",
+			"const": "1.0.0"
+		},
+		"run_id": {
+			"type": "string",
+			"minLength": 1
+		},
+		"debate_id": {
+			"type": "string",
+			"minLength": 1
+		},
+		"round_index": {
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 12
+		},
+		"participants": {
+			"type": "array",
+			"minItems": 2,
+			"items": {
+				"type": "string",
+				"enum": [
+					"EvaluatorAgent",
+					"AdversaryAgent",
+					"TieBreakerAgent",
+					"PlanEvaluatorAgent",
+					"PlanAdversaryAgent",
+					"HypothesisValidatorAgent",
+					"SprintContractAuditorAgent",
+					"ReviewIntegratorAgent",
+					"StackResearchAgent"
+				]
+			}
+		},
+		"claims": {
+			"type": "array",
+			"items": {
+				"type": "string",
+				"minLength": 1
+			}
+		},
+		"rebuttals": {
+			"type": "array",
+			"items": {
+				"type": "string",
+				"minLength": 1
+			}
+		},
+		"evidence_refs": {
+			"type": "array",
+			"items": {
+				"type": "string",
+				"minLength": 1
+			}
+		},
+		"token_usage": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["per_agent", "round_total"],
+			"properties": {
+				"per_agent": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 35000
+					}
+				},
+				"round_total": {
+					"type": "integer",
+					"minimum": 0
+				}
+			}
+		},
+		"budget_profile": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": [
+				"name",
+				"min_focus_rounds",
+				"max_rounds",
+				"max_exchanges_per_round",
+				"round_token_cap",
+				"debate_global_cap"
+			],
+			"properties": {
+				"name": {
+					"type": "string",
+					"enum": ["aggressive", "plan"]
+				},
+				"min_focus_rounds": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"max_rounds": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 12
+				},
+				"max_exchanges_per_round": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 6
+				},
+				"round_token_cap": {
+					"type": "integer"
+				},
+				"debate_global_cap": {
+					"type": "integer"
+				}
+			}
+		},
+		"consensus_delta": {
+			"type": "number",
+			"minimum": -1,
+			"maximum": 1
+		}
+	}
+}

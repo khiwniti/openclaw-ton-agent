@@ -46,87 +46,91 @@ export async function runScanTick(opts: PipelineOpts): Promise<ScanTickResult> {
     return result;
   }
 
-  for (const view of recent) {
-    if (seen.has(view.master)) continue;
-    seen.add(view.master);
-    result.scanned++;
+  const batchSize = 6;
+  for (let i = 0; i < recent.length; i += batchSize) {
+    const batch = recent.slice(i, i + batchSize);
+    await Promise.all(batch.map(async (view) => {
+      if (seen.has(view.master)) return;
+      seen.add(view.master);
+      result.scanned++;
 
-    const audit = await source.auditMaster(view.master);
-    if (!audit?.ok) {
-      journal.append({ ts: Date.now(), kind: "scan.audit_failed", source: source.name, master: view.master });
-      result.dropped++;
-      continue;
-    }
+      const audit = await source.auditMaster(view.master);
+      if (!audit?.ok) {
+        journal.append({ ts: Date.now(), kind: "scan.audit_failed", source: source.name, master: view.master });
+        result.dropped++;
+        return;
+      }
 
-    const hasQuote = view.priceTon !== null && view.liquidityTon !== null;
-    const score = computeScore({
-      renounced: audit.renounced,
-      locked: audit.locked,
-      honeypot: audit.honeypot,
-      holders: audit.holders,
-      ageHours: audit.ageHours,
-      liquidityTon: view.liquidityTon,
-      poolAvailable: !!view.poolAddress,
-    });
+      const hasQuote = view.priceTon !== null && typeof view.priceTon === "number" && view.priceTon > 0;
+      const score = computeScore({
+        renounced: audit.renounced,
+        locked: audit.locked,
+        honeypot: !audit.honeypot, // true = safe from honeypot
+        holders: audit.holders,
+        ageHours: audit.ageHours,
+        liquidityTon: view.liquidityTon,
+        poolAvailable: !!view.poolAddress,
+      });
 
-    const envelope = {
-      id: newId("sig"),
-      ts: Date.now(),
-      source: isFixture(view.master) ? "audit" : "radar",
-      token: {
-        address: view.master,
-        name: view.name,
-        ticker: view.symbol,
-        decimals: view.decimals,
-        priceTon: hasQuote ? (view.priceTon ?? null) : null,
-        curvePct: view.curvePct ?? null,
-        liquidityTon: hasQuote ? (view.liquidityTon ?? null) : null,
-        holders: audit.holders ?? undefined,
-      },
-      audit: { verified: audit.verified, renounced: audit.renounced, locked: audit.locked, honeypot: audit.honeypot },
-      score: { soft: score.soft, risk: score.risk },
-      meta: {
-        source: source.name,
-        poolAddress: view.poolAddress,
-        scoreBreakdown: { audit: score.auditDeduction, holders: score.holdersDeduction, age: score.ageDeduction, liquidity: score.liquidityDeduction, gap: score.dataGapDeduction },
-      },
-    } as const;
+      const envelope = {
+        id: newId("sig"),
+        ts: Date.now(),
+        source: isFixture(view.master) ? "audit" : "radar",
+        token: {
+          address: view.master,
+          name: view.name,
+          ticker: view.symbol,
+          decimals: view.decimals,
+          priceTon: view.priceTon ?? null,
+          curvePct: view.curvePct ?? null,
+          liquidityTon: view.liquidityTon ?? null,
+          holders: audit.holders ?? undefined,
+        },
+        audit: { verified: audit.verified, renounced: audit.renounced, locked: audit.locked, honeypot: audit.honeypot },
+        score: { soft: score.soft, risk: score.risk },
+        meta: {
+          source: source.name,
+          poolAddress: view.poolAddress,
+          scoreBreakdown: { audit: score.auditDeduction, holders: score.holdersDeduction, age: score.ageDeduction, liquidity: score.liquidityDeduction, gap: score.dataGapDeduction },
+        },
+      } as const;
 
-    const envelopeParsed = validateEnvelope(envelope);
-    if (!envelopeParsed.ok) {
-      journal.append({ ts: Date.now(), kind: "scan.drop", master: view.master, reason: envelopeParsed.reason });
-      result.dropped++;
-      continue;
-    }
-    const parsed = envelopeParsed.value;
+      const envelopeParsed = validateEnvelope(envelope);
+      if (!envelopeParsed.ok) {
+        journal.append({ ts: Date.now(), kind: "scan.drop", master: view.master, reason: envelopeParsed.reason });
+        result.dropped++;
+        return;
+      }
+      const parsed = envelopeParsed.value;
 
-    const status = hasQuote ? "validated" : "incomplete";
-    if (!hasQuote) result.incomplete++;
-    const flags = [...audit.flags];
-    if (!hasQuote) flags.push("quote_unavailable");
+      const status = hasQuote ? "validated" : "incomplete";
+      if (!hasQuote) result.incomplete++;
+      const flags = [...audit.flags];
+      if (!hasQuote) flags.push("quote_unavailable");
 
-    const ingested: IngestedEnvelope = {
-      ...parsed,
-      status,
-      flags,
-      reasoning: `audit.verified=${audit.verified} renounced=${audit.renounced} soft=${score.soft} risk=${score.risk}`,
-    };
+      const ingested: IngestedEnvelope = {
+        ...parsed,
+        status,
+        flags,
+        reasoning: `audit.verified=${audit.verified} renounced=${audit.renounced} soft=${score.soft} risk=${score.risk}`,
+      };
 
-    const ingestedParsed = validateIngested(ingested);
-    if (!ingestedParsed.ok) {
-      journal.append({ ts: Date.now(), kind: "scan.drop", master: view.master, reason: `ingest invalid: ${ingestedParsed.reason}` });
-      result.dropped++;
-      continue;
-    }
+      const ingestedParsed = validateIngested(ingested);
+      if (!ingestedParsed.ok) {
+        journal.append({ ts: Date.now(), kind: "scan.drop", master: view.master, reason: `ingest invalid: ${ingestedParsed.reason}` });
+        result.dropped++;
+        return;
+      }
 
-    const emitted = await emit(parsed);
-    if (emitted && typeof emitted === "object" && "sent" in emitted) {
-      (ingested.meta ??= {})["signalOut"] = emitted;
-    }
+      const emitted = await emit(parsed);
+      if (emitted && typeof emitted === "object" && "sent" in emitted) {
+        (ingested.meta ??= {})["signalOut"] = emitted;
+      }
 
-    journal.append(ingested);
-    result.envelopes.push(ingested);
-    result.emitted++;
+      journal.append(ingested);
+      result.envelopes.push(ingested);
+      result.emitted++;
+    }));
   }
 
   return result;

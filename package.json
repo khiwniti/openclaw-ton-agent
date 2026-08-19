@@ -20,6 +20,7 @@
     "agents:dev": "npm --workspace packages/agents run dev",
     "agents:start": "npm --workspace packages/agents run start",
     "orchestration:dev": "npm --workspace packages/orchestration run dev",
+    "swap": "npx tsx scripts/manual-swap.ts",
     "test": "npm test --workspaces --if-present",
     "typecheck": "tsc --noEmit",
     "dev": "concurrently \"npm run scanner:dev\" \"npm run api:dev\" \"npm run agents:dev\" \"npm run orchestration:dev\"",

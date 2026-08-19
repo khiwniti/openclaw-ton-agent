@@ -29,12 +29,13 @@ const tonapiSourceImpl: ScannerSource = {
           !a.symbol?.includes("_") &&
           (a.community === false || Number(a.popularity_index) > 0)
         );
-        for (const a of tradeable.slice(0, SCANNER_CONFIG.scanLimit)) {
-          if (!a.contract_address) continue;
+        const slice = tradeable.slice(0, SCANNER_CONFIG.scanLimit);
+        const poolPromises = slice.map(async (a) => {
+          if (!a.contract_address) return null;
           const priceUsd = Number(a.dex_usd_price ?? a.third_party_usd_price);
           const priceTon = priceUsd / tonPriceUsd;
           const pool = await fetchPoolForMaster(a.contract_address);
-          views.push({
+          return {
             master: a.contract_address,
             symbol: a.symbol ?? "",
             name: a.display_name ?? a.symbol ?? "",
@@ -43,7 +44,13 @@ const tonapiSourceImpl: ScannerSource = {
             liquidityTon: pool?.liquidityTon ?? null,
             curvePct: pool?.curvePct ?? null,
             poolAddress: pool?.pool?.address ?? null,
-          });
+          };
+        });
+        const resolved = await Promise.allSettled(poolPromises);
+        for (const r of resolved) {
+          if (r.status === "fulfilled" && r.value) {
+            views.push(r.value);
+          }
         }
       }
     } catch {
@@ -54,18 +61,18 @@ const tonapiSourceImpl: ScannerSource = {
     try {
       const r = await tonapiGet("/jettons", {
         params: { limit: SCANNER_CONFIG.scanLimit, verified: "false", sort: "created" },
-        timeoutMs: 8_000,
+        timeoutMs: 6_000,
       });
       const raw = r.data?.jettons;
       const items: unknown[] = Array.isArray(raw) ? raw : [];
-      for (const item of items) {
-        if (!item || typeof item !== "object") continue;
+      const tonapiPromises = items.map(async (item) => {
+        if (!item || typeof item !== "object") return null;
         const meta = (item as { metadata?: { address?: string; symbol?: string; name?: string; decimals?: string } }).metadata;
-        if (!meta?.address) continue;
+        if (!meta?.address) return null;
         const master = meta.address;
-        if (views.some((v) => v.master === master)) continue;
+        if (views.some((v) => v.master === master)) return null;
         const pool = await fetchPoolForMaster(master);
-        views.push({
+        return {
           master,
           symbol: meta.symbol ?? "",
           name: meta.name ?? "",
@@ -74,7 +81,13 @@ const tonapiSourceImpl: ScannerSource = {
           liquidityTon: pool?.liquidityTon ?? null,
           curvePct: pool?.curvePct ?? null,
           poolAddress: pool?.pool?.address ?? null,
-        });
+        };
+      });
+      const resolvedTonapi = await Promise.allSettled(tonapiPromises);
+      for (const r of resolvedTonapi) {
+        if (r.status === "fulfilled" && r.value) {
+          views.push(r.value);
+        }
       }
     } catch {
       // continue
@@ -118,7 +131,7 @@ async function fetchPoolForMaster(master: string): Promise<{ master: string; poo
 
     // Try Ston.fi pool data first — gives real reserves
     const poolRes = await fetch(`https://api.ston.fi/v1/pools?token0=${master}`, {
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.timeout(2_000),
     });
     if (poolRes.ok) {
       const poolData = (await poolRes.json()) as { pool_list?: Array<{ address?: string; token0_balance?: string; token1_balance?: string; lp_total_supply_usd?: string }> };
@@ -126,11 +139,15 @@ async function fetchPoolForMaster(master: string): Promise<{ master: string; poo
       const pool = pools.find((p) => p.address) ?? pools[0];
       if (pool?.address) {
         const lpUsd = Number(pool.lp_total_supply_usd);
-        const liquidityTon = Number.isFinite(lpUsd) && lpUsd > 0 ? lpUsd / tonPriceUsd : null;
-        // Derive price from reserves if available
         const t0Bal = Number(pool.token0_balance);
         const t1Bal = Number(pool.token1_balance);
         const priceTon = t0Bal > 0 && t1Bal > 0 ? t1Bal / t0Bal : null;
+        const liquidityTon =
+          Number.isFinite(lpUsd) && lpUsd > 0
+            ? lpUsd / tonPriceUsd
+            : t1Bal > 0
+              ? t1Bal * 2
+              : null;
         return {
           master,
           pool: { address: pool.address },
@@ -141,9 +158,9 @@ async function fetchPoolForMaster(master: string): Promise<{ master: string; poo
       }
     }
 
-    // Fallback: Ston.fi asset endpoint for price only, no liquidity fabrication
+    // Fallback: Ston.fi asset endpoint for price only
     const assetRes = await fetch(`https://api.ston.fi/v1/assets/${master}`, {
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.timeout(2_000),
     });
     if (assetRes.ok) {
       const data = (await assetRes.json()) as { asset?: { dex_usd_price?: string; third_party_usd_price?: string } };
@@ -162,9 +179,7 @@ async function fetchPoolForMaster(master: string): Promise<{ master: string; poo
     // continue
   }
 
-  // Return null if no pool exists — never fabricate a fake quote
   return null;
 }
-
 export const tonapiSource: ScannerSource = tonapiSourceImpl;
 

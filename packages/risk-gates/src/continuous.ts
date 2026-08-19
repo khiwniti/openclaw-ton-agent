@@ -14,6 +14,7 @@ const log = createLogger("risk-gates");
 export async function runContinuousRiskGates(opts: {
   signalsPath: string;
   gatedPath: string;
+  positionsPath?: string;
   pollIntervalMs?: number;
 }) {
   const pollIntervalMs = opts.pollIntervalMs ?? 3000;
@@ -32,6 +33,7 @@ export async function runContinuousRiskGates(opts: {
   log.info("continuous risk-gates started", {
     signals: opts.signalsPath,
     gated: opts.gatedPath,
+    positions: opts.positionsPath,
     existingGatedCount: existingGated.length,
   });
 
@@ -58,10 +60,30 @@ export async function runContinuousRiskGates(opts: {
           sources: ["market-intel:continuous", "risk-gates:continuous"],
         });
 
+        let openPositions: Array<{ address: string; group?: string; pnlPct: number | null; sizeTon: number; sector?: string }> = [];
+        if (opts.positionsPath && fs.existsSync(opts.positionsPath)) {
+          const pRows = readJournal(opts.positionsPath);
+          const activeMap = new Map<string, { address: string; sizeTon: number }>();
+          for (const r of pRows) {
+            if (!r || typeof r !== "object") continue;
+            const row = r as { kind?: string; pos?: { tokenAddress: string; amountTon: number } };
+            if (row.kind === "position.open" && row.pos?.tokenAddress) {
+              activeMap.set(row.pos.tokenAddress, { address: row.pos.tokenAddress, sizeTon: row.pos.amountTon });
+            } else if (row.kind === "position.closed" && row.pos?.tokenAddress) {
+              activeMap.delete(row.pos.tokenAddress);
+            }
+          }
+          openPositions = Array.from(activeMap.values()).map(p => ({
+            address: p.address,
+            pnlPct: null,
+            sizeTon: p.sizeTon,
+          }));
+        }
+
         const result = evaluateGates(annotated, {
           now: Date.now(),
           cooldowns,
-          openPositions: [],
+          openPositions,
           drawdownPct: 0,
           killSwitchFlipped: process.env.KILL_SWITCH_FLIPPED === "1",
           bankrollTon: GATE_CONFIG.bankrollTon,
@@ -73,6 +95,7 @@ export async function runContinuousRiskGates(opts: {
           verdict: result.verdict,
           score: env.score?.soft ?? 0,
           sizeTon: result.sizeTon,
+          reasons: result.reasons,
         });
 
         const gated = { ...annotated, meta: { ...(annotated.meta ?? {}), ...gatedMeta(result) } };
@@ -94,5 +117,6 @@ if (process.argv[1] && process.argv[1].endsWith("continuous.ts")) {
   const network = process.env.TON_NETWORK || "testnet";
   const signalsPath = path.join(dataDir, `signals-${network}.ndjson`);
   const gatedPath = path.join(dataDir, `gated-${network}.ndjson`);
-  runContinuousRiskGates({ signalsPath, gatedPath });
+  const positionsPath = path.join(dataDir, `positions-${network}.ndjson`);
+  runContinuousRiskGates({ signalsPath, gatedPath, positionsPath });
 }

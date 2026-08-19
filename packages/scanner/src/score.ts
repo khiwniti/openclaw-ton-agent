@@ -67,7 +67,6 @@ export function computeScore(input: ScoreInput): ScoreBreakdown {
     liquidityDeduction += 5;
   }
 
-  if (input.holders === null) dataGapDeduction += 20;
 
   const risk = Math.min(100, auditDeduction + holdersDeduction + ageDeduction + liquidityDeduction + dataGapDeduction);
   const soft = Math.max(0, Math.min(100, 100 - risk));

@@ -1,0 +1,33 @@
+{
+	"dryRun": false,
+	"coAuthor": {
+		"login": "pi-mono",
+		"email": "261679550+pi-mono@users.noreply.github.com",
+		"required": true
+	},
+	"branch": {
+		"strategy": "auto-feature-branch",
+		"protected": [
+			"main",
+			"master",
+			"release/*"
+		]
+	},
+	"push": {
+		"allowedRemotes": [
+			"origin"
+		]
+	},
+	"submodules": {
+		"ignore": true
+	},
+	"message": {
+		"template": "{type}({scope}): {subject}",
+		"templateNoScope": "{type}: {subject}",
+		"typeDefault": "chore",
+		"scopeDefault": "openclaw-ton-agent",
+		"bodySeparator": "\n\n",
+		"coAuthorTrailer": "Co-authored-by: {login} <{email}>",
+		"maxSubjectLength": 72
+	}
+}

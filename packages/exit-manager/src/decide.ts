@@ -203,6 +203,14 @@ export function stepPosition(pos: Position, priceTon: number, now: number, candl
   };
   
   // 7. Exit checks with precedence
+  // Hard time-stop: once time budget expires, exit immediately without waiting for price targets
+  const effectiveTimeStopMs = typeof pos.timeStopMs === "number" ? pos.timeStopMs : (pos.mode === "snipe" ? 30 * 60_000 : null);
+  if (effectiveTimeStopMs !== null && effectiveTimeStopMs > 0 && now - pos.entryTs >= effectiveTimeStopMs) {
+    const elapsedMin = ((now - pos.entryTs) / 60_000).toFixed(1);
+    const limitMin = (effectiveTimeStopMs / 60_000).toFixed(1);
+    return { action: "time_stop", exitPriceTon: priceTon, pos: next, reason: `time-stop (${elapsedMin}m >= ${limitMin}m)` };
+  }
+
   // Effective protective stop: tighter of break-even vs Chandelier trailing
   const breakEvenArmed = breakEvenAtTon !== null;
   const trailArmed = trailingStopTon !== null;
@@ -238,11 +246,5 @@ export function stepPosition(pos: Position, priceTon: number, now: number, candl
   if (priceTon <= pos.stopLossTon) {
     return { action: "sl", exitPriceTon: pos.stopLossTon, pos: next, reason: "stop-loss" };
   }
-  
-  // Time stop
-  if (pos.timeStopMs !== null && now - pos.entryTs >= pos.timeStopMs) {
-    return { action: "time_stop", exitPriceTon: priceTon, pos: next, reason: "time-stop" };
-  }
-  
   return { action: "hold", exitPriceTon: null, pos: next, reason: "" };
 }
