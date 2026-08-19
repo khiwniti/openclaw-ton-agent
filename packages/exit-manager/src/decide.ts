@@ -4,21 +4,23 @@
  * exits are off-chain; there is no on-chain stop order (architecture §9).
  *
  * Exit precedence when multiple levels are crossed:
- *   ladder_exit → partial_tp → trend_reversal (Supertrend/Chandelier) 
- *   → break_even (armed) → trailing (Chandelier) → take-profit → 
- *   structure_stop_loss (close-confirmed) → time-stop
+ *   time_stop (hard timeout) → ladder_exit → partial_tp 
+ *   → momentum_reversal (peak giveback / trend decay) 
+ *   → trend_reversal (Supertrend/Chandelier flip) 
+ *   → break_even (armed) → trailing (Chandelier) → take-profit 
+ *   → structure_stop_loss (close-confirmed) → stop-loss
  * 
  * Key improvements from intelligent SL/TP research:
- * - Chandelier Exit (ATR trailing) instead of fixed % trailing
+ * - Responsive Chandelier Exit (1.2x ATR for snipe, 2.5x ATR for swing)
+ * - Momentum giveback / peak retrace exit (locks in profits when trend fades)
  * - Supertrend/Parabolic SAR for trend reversal TP
  * - Structure-based SL (swing low/high + ATR buffer, close-confirmed)
  * - Laddered exits (scale out in tranches)
  * - Volatility regime filter (widen SL when ATR spikes)
- * - Close-confirmation SL (candle close, not wick)
- * - Volatility regime filter (widen SL when ATR spikes, reduce size)
+ * - Hard time-stop prioritized as top safety ceiling
  */
-import { modeConfig } from "./modes";
-import type { Position, TrendState } from "./position";
+import { modeConfig } from "./modes.js";
+import type { Position, TrendState } from "./position.js";
 
 export type ExitAction = 
   | "hold" 
@@ -29,9 +31,11 @@ export type ExitAction =
   | "time_stop" 
   | "partial_tp" 
   | "trend_reversal"
+  | "momentum_reversal"
   | "ladder_exit"
   | "structure_sl"
   | "blocked";
+
 export interface StepResult {
   action: ExitAction;
   exitPriceTon: number | null;
@@ -81,9 +85,9 @@ export function stepPosition(pos: Position, priceTon: number, now: number, candl
   let swingLow = pos.swingLow;
   let swingHigh = pos.swingHigh;
   
-  // 3. Chandelier Exit: trail behind highWater by (ATR * multiplier)
-  // Standard multiplier is 2-3x ATR for swing trading
-  const chandelierMultiplier = 2.5;
+  // 3. Mode-aware Chandelier Exit:
+  // For snipe mode, use responsive 1.2x ATR trailing. For swing mode, use 2.5x ATR.
+  const chandelierMultiplier = pos.mode === "snipe" ? 1.2 : 2.5;
   if (trailingStopTon === null && highWaterTon > pos.entryTon) {
     trailingStopTon = chandelierStop(highWaterTon, pos.atrAtEntry, chandelierMultiplier);
   } else if (trailingStopTon !== null && highWaterTon > pos.highWaterTon) {
@@ -96,100 +100,22 @@ export function stepPosition(pos: Position, priceTon: number, now: number, candl
   }
   
   // 5. Volatility regime adjustment: widen SL if ATR spikes
-  // Note: In production, currentAtr would come from real-time price feed
-  // For now, we use the entry ATR as reference
   const volatilityMultiplier = 2.0; // Max 2x widening
   let effectiveStopLoss = pos.initialStopLossTon;
   if (pos.swingLow !== null) {
-    // Use structure-based SL as base
     effectiveStopLoss = Math.max(effectiveStopLoss, structureStopLoss(pos.swingLow, pos.atrAtEntry, 1.0));
   }
-  // Apply volatility widening
   effectiveStopLoss = volatilityAdjustedStop(effectiveStopLoss, pos.atrAtEntry, pos.atrAtEntry, volatilityMultiplier);
   
   // 6. Supertrend/Parabolic SAR trend line for trend reversal exit
-  // Simple implementation: trend line moves with Chandelier stop
   if (trendFlipPrice === null && trailingStopTon !== null) {
-    trendFlipPrice = trailingStopTon; // Initial trend line at first trailing stop
+    trendFlipPrice = trailingStopTon;
     trendState = "uptrend";
   }
-  // Update trend line as price moves favorably
   if (trendState === "uptrend" && trailingStopTon !== null && trailingStopTon > (trendFlipPrice ?? 0)) {
-    trendFlipPrice = trailingStopTon; // Trail the trend line up
+    trendFlipPrice = trailingStopTon;
   }
-  
-  // 4. Laddered exits (scale out in tranches)
-  if (pos.ladderExits && pos.ladderExits.length > 0) {
-    for (let i = 0; i < pos.ladderExits.length; i++) {
-      const ladder = pos.ladderExits[i];
-      if (!ladder.executed && priceTon >= ladder.priceTon) {
-        const nextLadder = [...pos.ladderExits];
-        nextLadder[i] = { ...ladder, executed: true };
-        const exitSizePct = ladder.sizePct;
-        const next = { 
-          ...pos, 
-          highWaterTon, 
-          lowWaterTon,
-          trailingStopTon, 
-          breakEvenAtTon,
-          trendFlipPrice,
-          trendState,
-          swingLow,
-          swingHigh,
-          remainingQty: pos.remainingQty * (1 - ladder.sizePct),
-          ladderExits: nextLadder,
-        };
-        return { 
-          action: "ladder_exit", 
-          exitPriceTon: priceTon, 
-          pos: next, 
-          reason: `ladder exit ${ladder.label} at ${ladder.priceTon.toFixed(6)} (sell ${(ladder.sizePct * 100).toFixed(0)}%)`,
-          exitSizePct,
-        };
-      }
-    }
-  }
-  
-  // 5. Partial take-profit levels (legacy mode config)
-  if (cfg.partialTakes && cfg.partialTakes.length > 0) {
-    for (let i = 0; i < cfg.partialTakes.length; i++) {
-      const pt = cfg.partialTakes[i];
-      if (!pos.partialTakesHit.includes(i) && priceTon >= pos.entryTon * (1 + pt.triggerPct)) {
-        const nextTakesHit = [...pos.partialTakesHit, i];
-        const next = { 
-          ...pos, 
-          highWaterTon, 
-          lowWaterTon,
-          trailingStopTon, 
-          breakEvenAtTon,
-          trendFlipPrice,
-          trendState,
-          swingLow,
-          swingHigh,
-          partialTakesHit: nextTakesHit,
-          remainingQty: pos.remainingQty * (1 - pt.sizePct),
-        };
-        return { 
-          action: "partial_tp", 
-          exitPriceTon: priceTon, 
-          pos: next, 
-          reason: `partial TP ${i + 1} at ${(pt.triggerPct * 100).toFixed(1)}% (sell ${(pt.sizePct * 100).toFixed(0)}%)`,
-          exitSizePct: pt.sizePct,
-        };
-      }
-    }
-  }
-  
-  // 6. Trend reversal exit (Supertrend/Chandelier flip) - catches trend changes early
-  if (trailingStopTon !== null && trendFlipPrice !== null && supertrendFlip(closePrice, trendFlipPrice, trendState)) {
-    return { 
-      action: "trend_reversal", 
-      exitPriceTon: closePrice, 
-      pos: { ...pos, highWaterTon, lowWaterTon, trailingStopTon, breakEvenAtTon, trendFlipPrice, trendState: "downtrend" }, 
-      reason: `trend reversal (Supertrend flip) at ${closePrice.toFixed(6)}` 
-    };
-  }
-  
+
   const next: Position = { 
     ...pos, 
     highWaterTon, 
@@ -201,27 +127,118 @@ export function stepPosition(pos: Position, priceTon: number, now: number, candl
     swingLow,
     swingHigh,
   };
-  
-  // 7. Exit checks with precedence
-  // Hard time-stop: once time budget expires, exit immediately without waiting for price targets
+
+  // ── PRIORITY 1: Hard Time-Stop Ceiling ──────────────────────────
   const effectiveTimeStopMs = typeof pos.timeStopMs === "number" ? pos.timeStopMs : (pos.mode === "snipe" ? 30 * 60_000 : null);
   if (effectiveTimeStopMs !== null && effectiveTimeStopMs > 0 && now - pos.entryTs >= effectiveTimeStopMs) {
     const elapsedMin = ((now - pos.entryTs) / 60_000).toFixed(1);
     const limitMin = (effectiveTimeStopMs / 60_000).toFixed(1);
     return { action: "time_stop", exitPriceTon: priceTon, pos: next, reason: `time-stop (${elapsedMin}m >= ${limitMin}m)` };
   }
+  
+  // ── PRIORITY 2: Laddered Exits (scale out in tranches) ─────────
+  if (pos.ladderExits && pos.ladderExits.length > 0) {
+    for (let i = 0; i < pos.ladderExits.length; i++) {
+      const ladder = pos.ladderExits[i];
+      if (!ladder.executed && priceTon >= ladder.priceTon) {
+        const nextLadder = [...pos.ladderExits];
+        nextLadder[i] = { ...ladder, executed: true };
+        const exitSizePct = ladder.sizePct;
+        const ladderNext = { 
+          ...next, 
+          remainingQty: pos.remainingQty * (1 - ladder.sizePct),
+          ladderExits: nextLadder,
+        };
+        return { 
+          action: "ladder_exit", 
+          exitPriceTon: priceTon, 
+          pos: ladderNext, 
+          reason: `ladder exit ${ladder.label} at ${ladder.priceTon.toFixed(6)} (sell ${(ladder.sizePct * 100).toFixed(0)}%)`,
+          exitSizePct,
+        };
+      }
+    }
+  }
+  
+  // ── PRIORITY 3: Partial Take-Profit Levels ─────────────────────
+  if (cfg.partialTakes && cfg.partialTakes.length > 0) {
+    for (let i = 0; i < cfg.partialTakes.length; i++) {
+      const pt = cfg.partialTakes[i];
+      if (!pos.partialTakesHit.includes(i) && priceTon >= pos.entryTon * (1 + pt.triggerPct)) {
+        const nextTakesHit = [...pos.partialTakesHit, i];
+        const ptNext = { 
+          ...next, 
+          partialTakesHit: nextTakesHit,
+          remainingQty: pos.remainingQty * (1 - pt.sizePct),
+        };
+        return { 
+          action: "partial_tp", 
+          exitPriceTon: priceTon, 
+          pos: ptNext, 
+          reason: `partial TP ${i + 1} at ${(pt.triggerPct * 100).toFixed(1)}% (sell ${(pt.sizePct * 100).toFixed(0)}%)`,
+          exitSizePct: pt.sizePct,
+        };
+      }
+    }
+  }
+  
+  // ── PRIORITY 4: Momentum Fade & Peak Retracement Protection ───
+  // When a position reached a strong peak gain, protect profit against momentum reversal
+  if (highWaterTon > pos.entryTon) {
+    const peakGainTon = highWaterTon - pos.entryTon;
+    const peakGainPct = peakGainTon / pos.entryTon;
+    
+    // Tier A: Strong peak gain (>= 8%) — allow max 35% retracement from peak
+    if (peakGainPct >= 0.08) {
+      const retraceFloor = pos.entryTon + (peakGainTon * 0.65);
+      if (priceTon <= retraceFloor) {
+        return {
+          action: "momentum_reversal",
+          exitPriceTon: priceTon,
+          pos: { ...next, trendState: "downtrend" },
+          reason: `momentum fade: gave back 35% of +${(peakGainPct * 100).toFixed(1)}% peak gain (floor: ${retraceFloor.toFixed(6)})`,
+        };
+      }
+    }
+    // Tier B: Moderate peak gain (>= 3.5%) — allow max 50% retracement from peak
+    else if (peakGainPct >= 0.035) {
+      const retraceFloor = pos.entryTon + (peakGainTon * 0.50);
+      if (priceTon <= retraceFloor) {
+        return {
+          action: "momentum_reversal",
+          exitPriceTon: priceTon,
+          pos: { ...next, trendState: "downtrend" },
+          reason: `momentum fade: gave back 50% of +${(peakGainPct * 100).toFixed(1)}% peak gain (floor: ${retraceFloor.toFixed(6)})`,
+        };
+      }
+    }
+  }
 
-  // Effective protective stop: tighter of break-even vs Chandelier trailing
+  // ── PRIORITY 5: Supertrend / Chandelier Reversal Exit ─────────
+  if (trailingStopTon !== null && trendFlipPrice !== null && supertrendFlip(closePrice, trendFlipPrice, trendState)) {
+    return { 
+      action: "trend_reversal", 
+      exitPriceTon: closePrice, 
+      pos: { ...next, trendState: "downtrend" }, 
+      reason: `trend reversal (Supertrend flip) at ${closePrice.toFixed(6)}` 
+    };
+  }
+
+  // ── PRIORITY 6: Protective Stops (Break-Even vs Trailing) ──────
   const breakEvenArmed = breakEvenAtTon !== null;
   const trailArmed = trailingStopTon !== null;
   const effectiveTrailingStop = trailArmed ? trailingStopTon! : -Infinity;
   const effectiveBreakEven = breakEvenArmed ? breakEvenAtTon! : -Infinity;
   const effectiveStop = Math.max(effectiveBreakEven, effectiveTrailingStop);
   
-  // Structure-based SL (close-confirmed): only trigger if CANDLE CLOSES beyond swing low + ATR buffer
+  if (effectiveStop !== -Infinity && priceTon <= effectiveStop) {
+    const action: ExitAction = breakEvenArmed && effectiveStop === breakEvenAtTon ? "break_even" : "trail";
+    return { action, exitPriceTon: effectiveStop, pos: next, reason: `${action} stop at ${effectiveStop.toFixed(6)}` };
+  }
+
+  // ── PRIORITY 7: Structure-based SL (close-confirmed) ───────────
   const structureSLTriggered = pos.swingLow !== null && 
     closePrice <= structureStopLoss(pos.swingLow, pos.atrAtEntry, 1.0);
-  
   if (structureSLTriggered) {
     return { 
       action: "structure_sl", 
@@ -231,20 +248,13 @@ export function stepPosition(pos: Position, priceTon: number, now: number, candl
     };
   }
   
-  // Chandelier trailing / break-even stop (intrabar OK for protective stops)
-  if (effectiveStop !== -Infinity && priceTon <= effectiveStop) {
-    const action: ExitAction = breakEvenArmed && effectiveStop === breakEvenAtTon ? "break_even" : "trail";
-    return { action, exitPriceTon: effectiveStop, pos: next, reason: `${action} stop at ${effectiveStop.toFixed(6)}` };
-  }
-  
-  // Take-profit
+  // ── PRIORITY 8: Fixed Take-Profit & Stop-Loss ──────────────────
   if (priceTon >= pos.takeProfitTon) {
     return { action: "tp", exitPriceTon: pos.takeProfitTon, pos: next, reason: "take-profit" };
   }
-  
-  // Initial stop loss (fallback)
   if (priceTon <= pos.stopLossTon) {
     return { action: "sl", exitPriceTon: pos.stopLossTon, pos: next, reason: "stop-loss" };
   }
+  
   return { action: "hold", exitPriceTon: null, pos: next, reason: "" };
 }

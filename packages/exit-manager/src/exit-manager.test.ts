@@ -76,8 +76,6 @@ test("break-even: arms after +2× fee, exits at entry on pullback", () => {
 });
 
 test("partial take-profit: snipe mode sells 50% at 30% gain", () => {
-  // Snipe mode has partialTakes: [{ triggerPct: 0.3, sizePct: 0.5 }, { triggerPct: 0.5, sizePct: 0.3 }]
-  // Entry 10, so 30% gain = 13, 50% gain = 15
   let p = pos({ mode: "snipe", takeProfitTon: 30, stopLossTon: 8.5 });
   
   // Price moves to 13 (30% gain) - should trigger first partial take (sell 50%)
@@ -85,7 +83,7 @@ test("partial take-profit: snipe mode sells 50% at 30% gain", () => {
   assert.equal(r.action, "partial_tp");
   assert.equal(r.exitPriceTon, 13);
   assert.equal(r.exitSizePct, 0.5);
-  assert.equal(r.pos.remainingQty, 1); // 50% of 2 = 1
+  assert.equal(r.pos.remainingQty, 1);
   assert.deepEqual(r.pos.partialTakesHit, [0]);
   p = r.pos;
   
@@ -94,25 +92,18 @@ test("partial take-profit: snipe mode sells 50% at 30% gain", () => {
   assert.equal(r.action, "partial_tp");
   assert.equal(r.exitPriceTon, 15);
   assert.equal(r.exitSizePct, 0.3);
-  assert.equal(r.pos.remainingQty, 0.7); // 1 * 0.7 = 0.7
+  assert.equal(r.pos.remainingQty, 0.7);
   assert.deepEqual(r.pos.partialTakesHit, [0, 1]);
 });
 
 test("trailing: arms part-way to TP, ratchets, and exits on a partial retrace", () => {
-  // Use swing with TP=12: Chandelier trailing activates at highWater > entry
-  // Chandelier: trailing = highWater - (ATR * 2.5) = 11.5 - (0.35 * 2.5) = 11.5 - 0.875 = 10.625
-  // break-even at 2% arms at 10.2
-  // At price 11.5: both break-even (10) and Chandelier (10.625) armed
-  // Effective stop = max(10, 10.625) = 10.625 (Chandelier)
-  // At price 7.5: triggers Chandelier trail (since 10.625 > 7.5)
   let p = pos({ mode: "swing", takeProfitTon: 12, stopLossTon: 8.5 });
   
   // Move to 11.5 (above trailing activation, but below take-profit at 12)
   let r = stepPosition(p, 11.5, T0 + 1000);
   assert.equal(r.action, "hold");
-  // Chandelier: 11.5 - (0.35 * 2.5) = 10.625
   assert.equal(r.pos.trailingStopTon, 11.5 - (0.35 * 2.5)); // 10.625
-  assert.equal(r.pos.breakEvenAtTon, 10); // break-even armed at 10
+  assert.equal(r.pos.breakEvenAtTon, 10);
   assert.equal(r.pos.highWaterTon, 11.5);
   p = r.pos;
   
@@ -124,11 +115,25 @@ test("trailing: arms part-way to TP, ratchets, and exits on a partial retrace", 
   p = r.pos;
   
   // Drop below both stops: Chandelier (10.925) is higher than break-even (10)
-  // But trend_reversal (Supertrend flip) triggers first since it checks trendFlipPrice
-  // trendFlipPrice = trailingStopTon = 10.925, closePrice = 7.5 < 10.925 → trend_reversal
+  // Momentum reversal triggers when giving back >35% of peak gain (11.8 is +18% peak gain, floor is 10 + 1.8 * 0.65 = 11.17)
   r = stepPosition(p, 7.5, T0 + 3000);
-  assert.equal(r.action, "trend_reversal"); // Supertrend flip takes precedence over trail
-  assert.equal(r.exitPriceTon, 7.5); // exits at close price
+  assert.equal(r.action, "momentum_reversal");
+  assert.equal(r.exitPriceTon, 7.5);
+});
+
+test("momentum reversal: locks profit when price gives back 50% of moderate peak gain", () => {
+  let p = pos({ mode: "snipe", entryTon: 1.0, stopLossTon: 0.95, takeProfitTon: 2.0, swingLow: 0.9, atrAtEntry: 0.05 });
+  
+  // Price reaches 1.05 (+5% peak gain)
+  let r = stepPosition(p, 1.05, T0 + 1000);
+  assert.equal(r.action, "hold");
+  assert.equal(r.pos.highWaterTon, 1.05);
+  p = r.pos;
+  
+  // Price retraces to 1.02 (gave back >50% of the 0.05 gain, floor is 1.025)
+  r = stepPosition(p, 1.02, T0 + 2000);
+  assert.equal(r.action, "momentum_reversal");
+  assert.equal(r.exitPriceTon, 1.02);
 });
 
 test("trailing stop only ratchets up, never down", () => {
@@ -136,7 +141,7 @@ test("trailing stop only ratchets up, never down", () => {
   p = stepPosition(p, 10.9, T0 + 1000).pos;
   const armed = p.trailingStopTon;
   assert.notEqual(armed, null);
-  const afterDrop = stepPosition(p, 10.5, T0 + 2000);
+  const afterDrop = stepPosition(p, 10.7, T0 + 2000);
   assert.equal(afterDrop.pos.trailingStopTon, armed);
   const afterRise = stepPosition(p, 11.1, T0 + 3000);
   assert.ok((afterRise.pos.trailingStopTon ?? 0) > (armed ?? 0));

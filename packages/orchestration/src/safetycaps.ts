@@ -9,7 +9,7 @@ export function hashTradeTicket(ticket: TradeTicket): string {
     const c = payload.charCodeAt(i)
     hash = ((hash << 5) - hash + c) | 0
   }
-  return `ticket_${Math.abs(hash).toString(16)}_${Date.now().toString(16)}`
+  return `ticket_${Math.abs(hash).toString(16)}`
 }
 
 export function authorizeTicket(
