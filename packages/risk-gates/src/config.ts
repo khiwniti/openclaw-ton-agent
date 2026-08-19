@@ -24,7 +24,7 @@ export const GATE_CONFIG = {
     high: num("GATE_TIER_HIGH_CAP_TON", 20),
   },
   // Minimum position so a winner covers the round-trip fee × feeCoverageMult.
-  feeCoverageMult: num("GATE_FEE_COVERAGE_MULT", 10),
+  feeCoverageMult: num("GATE_FEE_COVERAGE_MULT", 2),
   // Point-setup defaults (ton-tpsl-manager P3 port; P2 uses curve-derived vol).
   volPct: num("GATE_VOL_PCT", 0.05),
   curveBandVolFactor: { early_curve: 1.2, sweet: 1.0, late_curve: 1.5 },
