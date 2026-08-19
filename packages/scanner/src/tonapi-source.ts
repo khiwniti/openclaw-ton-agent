@@ -129,7 +129,7 @@ async function fetchPoolForMaster(master: string): Promise<{ master: string; poo
   try {
     const tonPriceUsd = await getTonPriceUsd();
 
-    // Try Ston.fi pool data first — gives real reserves
+    // 1. Try direct Ston.fi pool data first
     const poolRes = await fetch(`https://api.ston.fi/v1/pools?token0=${master}`, {
       signal: AbortSignal.timeout(2_000),
     });
@@ -158,7 +158,34 @@ async function fetchPoolForMaster(master: string): Promise<{ master: string; poo
       }
     }
 
-    // Fallback: Ston.fi asset endpoint for price only
+    // 2. Try STON.fi USDT paired pool (Multi-Hop candidate)
+    const usdtMaster = "EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs";
+    if (master !== usdtMaster) {
+      try {
+        const usdtPoolRes = await fetch(`https://api.ston.fi/v1/pools?token0=${usdtMaster}&token1=${master}`, {
+          signal: AbortSignal.timeout(2_000),
+        });
+        if (usdtPoolRes.ok) {
+          const poolData = (await usdtPoolRes.json()) as { pool_list?: Array<{ address?: string; token0_balance?: string; token1_balance?: string; lp_total_supply_usd?: string }> };
+          const pool = poolData.pool_list?.[0];
+          if (pool?.address) {
+            const lpUsd = Number(pool.lp_total_supply_usd);
+            const t0Bal = Number(pool.token0_balance);
+            const t1Bal = Number(pool.token1_balance);
+            const priceUsd = t0Bal > 0 && t1Bal > 0 ? (t0Bal / 1e6) / (t1Bal / 1e9) : null;
+            return {
+              master,
+              pool: { address: pool.address },
+              priceTon: priceUsd && priceUsd > 0 ? priceUsd / tonPriceUsd : null,
+              liquidityTon: Number.isFinite(lpUsd) && lpUsd > 0 ? lpUsd / tonPriceUsd : null,
+              curvePct: null,
+            };
+          }
+        }
+      } catch {}
+    }
+
+    // 3. Fallback: Ston.fi asset endpoint for price only
     const assetRes = await fetch(`https://api.ston.fi/v1/assets/${master}`, {
       signal: AbortSignal.timeout(2_000),
     });
@@ -181,5 +208,5 @@ async function fetchPoolForMaster(master: string): Promise<{ master: string; poo
 
   return null;
 }
-export const tonapiSource: ScannerSource = tonapiSourceImpl;
 
+export const tonapiSource: ScannerSource = tonapiSourceImpl;

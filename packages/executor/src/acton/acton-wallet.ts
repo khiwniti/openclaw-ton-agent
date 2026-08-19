@@ -44,10 +44,12 @@ export interface SwapPayload {
   dex: "stonfi" | "dedust";
   decimals: number;
 }
+
 const STONFI_ROUTER_MAINNET = "EQB3ncyBUTjZUA5EnFKR5_EnOMI9V1tTEAAPaiU71gc4TiUt";
 const STONFI_ROUTER_TESTNET = "kQBsGx9ArADUrREB34W-ghgsCgBShvfUr4Jvlu-0KGc33a1n";
 const STONFI_PTON_MAINNET = "EQCM3B12QK1e4yZSf8GtBRT0aLMNyEsBc_DhVfRRtOEffLez";
-const STONFI_PTON_TESTNET = "EQCM3B12QK1e4yZSf8GtBRT0aLMNyEsBc_DhVfRRtOEffLez"; // pTON V1 — same address on both networks per ston-fi/sdk
+const STONFI_PTON_TESTNET = "EQCM3B12QK1e4yZSf8GtBRT0aLMNyEsBc_DhVfRRtOEffLez";
+const USDT_MASTER_MAINNET = "EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs";
 
 class WalletMutex {
   private promise: Promise<void> = Promise.resolve();
@@ -167,6 +169,7 @@ export class ActonWallet implements WalletAdapter {
       return "EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c";
     }
   }
+
   private async resolveWallet(client: TonClient, publicKey: Buffer) {
     const preferredVersion = (process.env.WALLET_VERSION || "").toLowerCase();
     const walletId = this.opts.network === "testnet" ? { networkGlobalId: -3 } : undefined;
@@ -194,7 +197,6 @@ export class ActonWallet implements WalletAdapter {
 
     return w4;
   }
-
 
   private async sendSwapDirect(payload: SwapPayload): Promise<{ ok: boolean; txHash?: string; error?: string }> {
     const mnemonic = this.opts.mnemonic ?? process.env.WALLET_MASTER_MNEMONIC;
@@ -237,7 +239,7 @@ export class ActonWallet implements WalletAdapter {
         }
       }
 
-      // Determine active DEX: STON.fi vs DeDust
+      // 1. Resolve router pTON wallet
       let routerPtonWallet: Address;
       try {
         const ptonRes = await client.runMethod(pTonMinterAddr, "get_wallet_address", [
@@ -248,6 +250,7 @@ export class ActonWallet implements WalletAdapter {
         routerPtonWallet = Address.parse("EQARULUYsmJq1RiZ-YiH-IJLcAZUVkVff-KBPwEmmaQGH6aC");
       }
 
+      // 2. Resolve router Jetton wallet for target token
       let routerJettonWallet: Address;
       try {
         const rRes = await client.runMethod(jettonMasterAddr, "get_wallet_address", [
@@ -258,6 +261,7 @@ export class ActonWallet implements WalletAdapter {
         routerJettonWallet = jettonMasterAddr;
       }
 
+      // 3. Probing STON.fi direct TON pool
       let isStonfiActive = false;
       try {
         const poolRes = await client.runMethod(routerAddr, "get_pool_address", [
@@ -273,7 +277,7 @@ export class ActonWallet implements WalletAdapter {
         isStonfiActive = false;
       }
 
-      // Check DeDust pool if STON.fi is not active
+      // 4. Probing DeDust direct TON pool
       let isDedustActive = false;
       let dedustPoolAddrStr: string | null = null;
       if (!isStonfiActive && this.opts.network === "mainnet") {
@@ -299,17 +303,72 @@ export class ActonWallet implements WalletAdapter {
         }
       }
 
+      // 5. Probing DeDust USDT Multi-Hop pool
+      let isDedustUsdtActive = false;
+      let dedustUsdtPoolAddrStr: string | null = null;
       if (!isStonfiActive && !isDedustActive && this.opts.network === "mainnet") {
-        return { ok: false, error: `No active STON.fi or DeDust pool found for token ${payload.jettonMaster}` };
+        try {
+          const dedustFactory = Address.parse("EQBfBWT7X2BHg9tXAxzhz2aKiNTU1tpt5NsiK0uSDW_YAJ67");
+          const usdtAsset = Address.parse(USDT_MASTER_MAINNET);
+          const poolRes = await client.runMethod(dedustFactory, "get_pool", [
+            {
+              type: "slice",
+              cell: beginCell().storeUint(0, 32).storeAddress(usdtAsset).storeAddress(jettonMasterAddr).endCell()
+            }
+          ]);
+          const dPoolAddr = poolRes.stack.readAddress();
+          if (dPoolAddr && dPoolAddr.toString() !== "EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c") {
+            const dPoolState = await client.getContractState(dPoolAddr);
+            if (dPoolState.state === "active") {
+              isDedustUsdtActive = true;
+              dedustUsdtPoolAddrStr = dPoolAddr.toString();
+              log.info("multi-hop DeDust USDT pool detected", { pool: dedustUsdtPoolAddrStr, token: payload.jettonMaster });
+            }
+          }
+        } catch {
+          isDedustUsdtActive = false;
+        }
+      }
+
+      // 6. Probing STON.fi USDT Multi-Hop pool
+      let isStonfiUsdtActive = false;
+      if (!isStonfiActive && !isDedustActive && !isDedustUsdtActive && this.opts.network === "mainnet") {
+        try {
+          const usdtMasterAddr = Address.parse(USDT_MASTER_MAINNET);
+          const uRes = await client.runMethod(usdtMasterAddr, "get_wallet_address", [
+            { type: "slice", cell: beginCell().storeAddress(routerAddr).endCell() }
+          ]);
+          const routerUsdtWallet = uRes.stack.readAddress();
+          const poolRes = await client.runMethod(routerAddr, "get_pool_address", [
+            { type: "slice", cell: beginCell().storeAddress(routerUsdtWallet).endCell() },
+            { type: "slice", cell: beginCell().storeAddress(routerJettonWallet).endCell() }
+          ]);
+          const poolAddr = poolRes.stack.readAddress();
+          if (poolAddr && poolAddr.toString() !== "EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c") {
+            const poolState = await client.getContractState(poolAddr);
+            if (poolState.state === "active") {
+              isStonfiUsdtActive = true;
+              log.info("multi-hop STON.fi USDT pool detected", { pool: poolAddr.toString(), token: payload.jettonMaster });
+            }
+          }
+        } catch {
+          isStonfiUsdtActive = false;
+        }
+      }
+
+      if (!isStonfiActive && !isDedustActive && !isDedustUsdtActive && !isStonfiUsdtActive && this.opts.network === "mainnet") {
+        return { ok: false, error: `No active STON.fi or DeDust pool (direct or USDT hop) found for token ${payload.jettonMaster}` };
       }
 
       let targetAddr: Address;
       let msgValue: bigint;
       let body;
 
-      if (isDedustActive && dedustPoolAddrStr) {
+      const activeDedustPoolStr = dedustPoolAddrStr || dedustUsdtPoolAddrStr;
+
+      if ((isDedustActive || isDedustUsdtActive) && activeDedustPoolStr) {
         // DeDust execution path
-        const dedustPool = Address.parse(dedustPoolAddrStr);
+        const dedustPool = Address.parse(activeDedustPoolStr);
         if (payload.side === "buy") {
           targetAddr = dedustPool;
           msgValue = swapAmountNano + toNano("0.25");
@@ -381,7 +440,7 @@ export class ActonWallet implements WalletAdapter {
           msgValue = toNano("0.35");
         }
       } else {
-        // STON.fi execution path
+        // STON.fi execution path (Direct or USDT Multi-Hop)
         if (payload.side === "buy") {
           const forwardPayload = beginCell()
             .storeUint(0x25938561, 32) // Ston.fi V1 SWAP opcode
