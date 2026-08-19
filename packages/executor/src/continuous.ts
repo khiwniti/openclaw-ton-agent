@@ -67,6 +67,8 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
   const positionsJournal = new Journal(positionsPath);
   const openPositionsMap = new Map<string, Position>();
 
+  const closedTokens = new Set<string>();
+
   // 1. Restore positions from positions journal
   if (fs.existsSync(positionsPath)) {
     const pRows = readJournal(positionsPath);
@@ -77,6 +79,7 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
         openPositionsMap.set(row.pos.tokenAddress, row.pos);
       } else if (row.kind === "position.closed" && row.pos?.tokenAddress) {
         openPositionsMap.delete(row.pos.tokenAddress);
+        closedTokens.add(row.pos.tokenAddress);
       }
     }
   }
@@ -95,7 +98,13 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
     for (const o of orders) {
       if (!o || typeof o !== "object") continue;
       const ord = o as OrderRequest;
-      if (ord.side === "buy" && ord.token?.address && !soldTokens.has(ord.token.address) && !openPositionsMap.has(ord.token.address)) {
+      if (
+        ord.side === "buy" &&
+        ord.token?.address &&
+        !soldTokens.has(ord.token.address) &&
+        !closedTokens.has(ord.token.address) &&
+        !openPositionsMap.has(ord.token.address)
+      ) {
         const entryPrice = ord.entryTon && ord.entryTon > 0 ? ord.entryTon : 1.0;
         const stopLossTon = ord.stopLossTon && ord.stopLossTon > 0 ? ord.stopLossTon : entryPrice * 0.95;
         const takeProfitTon = ord.takeProfitTon && ord.takeProfitTon > 0 ? ord.takeProfitTon : entryPrice * 1.5;

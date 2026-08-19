@@ -87,6 +87,8 @@ kill_timeout = "60s"
   GATE_FEE_COVERAGE_MULT = "1"
   GATE_NETWORK_FEE_TON = "0.01"
   GATE_COOLDOWN_MS = "120000"
+  FORCE_CLOSE_ALL = "false"
+  CLEAR_STUCK_POSITIONS = "false"
 
 
   SQLITE_PATH = "/app/data/agent.db"
