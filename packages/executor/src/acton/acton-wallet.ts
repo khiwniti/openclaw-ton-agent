@@ -87,7 +87,7 @@ export class ActonWallet implements WalletAdapter {
     if (order.confirmRequired) {
       return this.bounced(order, "ActonWallet: order requires operator confirmation (confirm-first) — surface to trader-ui");
     }
-    const minOrderTon = this.opts.minOrderTon ?? 0.20;
+    const minOrderTon = this.opts.minOrderTon ?? 0.10;
     if (order.amountTon < minOrderTon) {
       return this.bounced(order, `ActonWallet: order amount ${order.amountTon.toFixed(4)} TON below minimum ${minOrderTon} TON`);
     }
@@ -118,7 +118,7 @@ export class ActonWallet implements WalletAdapter {
         }
       }
 
-      if (!Number.isFinite(balanceTon) || balanceTon <= 0) {
+      if (payload.side === "buy" && (!Number.isFinite(balanceTon) || balanceTon <= 0)) {
         return this.bounced(order, `[buy] balance unavailable or empty: have=${(Number.isFinite(balanceTon) ? balanceTon : 0).toFixed(3)} TON`);
       }
 
@@ -230,7 +230,7 @@ export class ActonWallet implements WalletAdapter {
 
       if (payload.side === "buy") {
         const currentBalNano = await contract.getBalance().catch(() => 0n);
-        const requiredNano = swapAmountNano + toNano("0.20");
+        const requiredNano = swapAmountNano + toNano("0.14");
         if (currentBalNano < requiredNano) {
           return {
             ok: false,
