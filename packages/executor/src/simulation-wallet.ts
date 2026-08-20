@@ -60,14 +60,20 @@ export class SimulationWallet implements WalletAdapter {
       const balanceTon = Number(balStr) / 1e9;
 
       if (order.side === "buy") {
-        const requiredTon = order.amountTon + 0.20; // swap amount + gas reserve
+        const swapBackReserveTon = Number(process.env.RESERVE_SWAP_BACK_TON ?? "0.18");
+        const buyGasTon = 0.12;
+        const requiredTon = order.amountTon + buyGasTon + swapBackReserveTon;
         if (balanceTon < requiredTon) {
-          return { pass: false, phase: "preflight", reason: `sim_rejected: insufficient TON balance: have ${balanceTon.toFixed(3)}, need ${requiredTon.toFixed(3)}` };
+          return {
+            pass: false,
+            phase: "preflight",
+            reason: `sim_rejected: insufficient TON balance to preserve swap-back fee: have ${balanceTon.toFixed(3)}, need ${requiredTon.toFixed(3)} (order: ${order.amountTon.toFixed(3)}, gas: ${buyGasTon}, reserve: ${swapBackReserveTon})`,
+          };
         }
       } else {
         // Sell
-        if (balanceTon < 0.20) {
-          return { pass: false, phase: "preflight", reason: `sim_rejected: insufficient TON for gas: have ${balanceTon.toFixed(3)}, need 0.20` };
+        if (balanceTon < 0.15) {
+          return { pass: false, phase: "preflight", reason: `sim_rejected: insufficient TON for sell gas: have ${balanceTon.toFixed(3)}, need 0.15` };
         }
 
         const masterAddr = Address.parse(order.token.address);

@@ -118,8 +118,15 @@ export class ActonWallet implements WalletAdapter {
         }
       }
 
-      if (payload.side === "buy" && (!Number.isFinite(balanceTon) || balanceTon <= 0)) {
-        return this.bounced(order, `[buy] balance unavailable or empty: have=${(Number.isFinite(balanceTon) ? balanceTon : 0).toFixed(3)} TON`);
+      const reserveSwapBackTon = Number(process.env.RESERVE_SWAP_BACK_TON ?? "0.18");
+      const buyGasTon = 0.12;
+      const minRequiredBuyBalance = payload.amountTon + buyGasTon + reserveSwapBackTon;
+
+      if (payload.side === "buy" && balanceTon < minRequiredBuyBalance) {
+        return this.bounced(
+          order,
+          `[buy] insufficient balance to preserve swap-back fee: have=${balanceTon.toFixed(3)} TON, need=${minRequiredBuyBalance.toFixed(3)} TON (order: ${payload.amountTon.toFixed(3)}, gas: ${buyGasTon}, reserve: ${reserveSwapBackTon})`
+        );
       }
 
       if (payload.side === "buy" && (order.expectedTokenQty ?? 0) < (order.minOutTokenQty ?? 0)) {
@@ -229,14 +236,21 @@ export class ActonWallet implements WalletAdapter {
       const minOutNano = BigInt(payload.minOutTokenQty);
 
       const currentBalNano = await contract.getBalance().catch(() => 0n);
+      const buyGasNano = toNano("0.12");
+      const swapBackReserveNano = toNano(process.env.RESERVE_SWAP_BACK_TON ?? "0.18");
       const requiredNano = payload.side === "buy"
-        ? swapAmountNano + toNano("0.14")
+        ? swapAmountNano + buyGasNano + swapBackReserveNano
         : toNano("0.15");
 
       if (currentBalNano < requiredNano) {
+        const needStr = (Number(requiredNano) / 1e9).toFixed(3);
+        const haveStr = (Number(currentBalNano) / 1e9).toFixed(3);
+        const reason = payload.side === "buy"
+          ? `insufficient on-chain balance to preserve swap-back fee: have ${haveStr} TON, need ${needStr} TON (order: ${(Number(swapAmountNano)/1e9).toFixed(3)} + gas: 0.12 + reserve: ${(Number(swapBackReserveNano)/1e9).toFixed(3)})`
+          : `insufficient on-chain balance for sell gas: have ${haveStr} TON, need ${needStr} TON`;
         return {
           ok: false,
-          error: `insufficient on-chain balance: have ${(Number(currentBalNano) / 1e9).toFixed(3)} TON, need ${(Number(requiredNano) / 1e9).toFixed(3)} TON`,
+          error: reason,
         };
       }
 
