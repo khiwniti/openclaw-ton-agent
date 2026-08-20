@@ -228,15 +228,16 @@ export class ActonWallet implements WalletAdapter {
       const swapAmountNano = BigInt(Math.floor(payload.amountTon * 1e9));
       const minOutNano = BigInt(payload.minOutTokenQty);
 
-      if (payload.side === "buy") {
-        const currentBalNano = await contract.getBalance().catch(() => 0n);
-        const requiredNano = swapAmountNano + toNano("0.14");
-        if (currentBalNano < requiredNano) {
-          return {
-            ok: false,
-            error: `insufficient on-chain balance: have ${(Number(currentBalNano) / 1e9).toFixed(3)} TON, need ${(Number(requiredNano) / 1e9).toFixed(3)} TON`,
-          };
-        }
+      const currentBalNano = await contract.getBalance().catch(() => 0n);
+      const requiredNano = payload.side === "buy"
+        ? swapAmountNano + toNano("0.14")
+        : toNano("0.15");
+
+      if (currentBalNano < requiredNano) {
+        return {
+          ok: false,
+          error: `insufficient on-chain balance: have ${(Number(currentBalNano) / 1e9).toFixed(3)} TON, need ${(Number(requiredNano) / 1e9).toFixed(3)} TON`,
+        };
       }
 
       // 1. Resolve router pTON wallet
@@ -457,13 +458,13 @@ export class ActonWallet implements WalletAdapter {
             .storeAddress(routerAddr)
             .storeAddress(wallet.address)
             .storeBit(0)
-            .storeCoins(toNano("0.12")) // forward_ton_amount for router execution gas
+            .storeCoins(toNano("0.085")) // forward_ton_amount for router execution gas
             .storeBit(1)
             .storeRef(forwardPayload)
             .endCell();
 
           targetAddr = routerPtonWallet;
-          msgValue = swapAmountNano + toNano("0.16");
+          msgValue = swapAmountNano + toNano("0.12");
         } else {
           // STON.fi sell path
           let userJettonWallet: Address;
@@ -516,13 +517,13 @@ export class ActonWallet implements WalletAdapter {
             .storeAddress(routerAddr)
             .storeAddress(wallet.address)
             .storeBit(0)
-            .storeCoins(toNano("0.14"))
+            .storeCoins(toNano("0.085"))
             .storeBit(1)
             .storeRef(forwardPayload)
             .endCell();
 
           targetAddr = userJettonWallet;
-          msgValue = toNano("0.20");
+          msgValue = toNano("0.13");
         }
       }
 
