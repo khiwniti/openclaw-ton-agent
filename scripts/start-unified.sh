@@ -23,6 +23,7 @@ rm -f "$DATA_DIR/gated-"*.ndjson "$DATA_DIR/signals-"*.ndjson 2>/dev/null || tru
 
 # Export environment for both processes
 export NODE_ENV=${NODE_ENV:-production}
+export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=256 --no-warnings=ExperimentalWarning"
 export OBSERVE_ONLY=${OBSERVE_ONLY:-true}
 export TON_NETWORK=${TON_NETWORK:-mainnet}
 export SCAN_RADAR_INTERVAL_MS=${SCAN_RADAR_INTERVAL_MS:-60000}

@@ -85,7 +85,7 @@ COPY --from=builder --chown=node:node /app/openclaw  openclaw
 COPY --from=builder --chown=node:node /app/scripts   scripts
 
 # Runtime environment: avoid ESM/tsx surprises and .ts cache poisoning
-ENV NODE_OPTIONS="--no-warnings=ExperimentalWarning"
+ENV NODE_OPTIONS="--no-warnings=ExperimentalWarning --max-old-space-size=256"
 ENV TSX_CACHE="0"
 ENV NODE_PATH="/app/node_modules:/app/packages"
 ENV PYTHON=""
