@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "contract_version": "1.0.0",
+  "incident_id": "INC-2026-08-20-001",
+  "trigger": "Production position closing failure, stuck sniping orders >30m, and batch-blocking execution on Fly.io TON trading container",
+  "blast_radius": "packages/exit-manager, packages/executor, packages/scanner, packages/risk-gates, on-chain TON wallet trading activity",
+  "mitigation": "1. Prioritized hard time-stop at top of exit precedence with safe null/undefined handling in decide.ts. 2. Added peak retracement / momentum fade protection (1.2x ATR trailing for snipe). 3. Implemented Asynchronous Priority Order Queue Manager (OrderQueueManager) to eliminate batch blocking. 4. Implemented DeDust V2 and USDT multi-hop DEX routing. 5. Fixed position reconstruction on boot to prevent resurrection of closed positions. 6. Reduced scanner seen TTL and risk gate cooldowns to 15s.",
+  "rollback_ref": {
+    "revert_command": "git revert 0459aee..HEAD",
+    "revert_branch": "main",
+    "patch_bundle": "patches/INC-2026-08-20-001.patch"
+  },
+  "postmortem_required": true,
+  "policy_override": {
+    "human_override": true,
+    "approver_count": 1,
+    "justification": "Production trading safety and position liquidity guarantee"
+  }
+}
