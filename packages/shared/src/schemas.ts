@@ -11,6 +11,32 @@ export type Token = {
   holders?: number | undefined;
 };
 
+export type LifecycleState = "OPEN" | "PARTIAL_EXIT" | "FULL_EXIT" | "SETTLED";
+
+export type SettlementStatus = "PENDING" | "CONFIRMED" | "FAILED";
+
+export type FillRecord = {
+  id: string;
+  positionId: string;
+  orderId: string;
+  tokenAddress: string;
+  action: "BUY" | "SELL";
+  qty: number;
+  priceTon: number;
+  feesTon: number;
+  ts: number;
+  settlement: SettlementStatus;
+  pnlTon?: number; // Realized P&L for SELL actions
+};
+
+export type PositionEvent = {
+  type: LifecycleState;
+  positionId: string;
+  ts: number;
+  payload: Record<string, unknown>;
+  idempotencyKey?: string;
+};
+
 export type Audit = {
   verified: number;
   renounced: boolean;
@@ -55,6 +81,32 @@ export const TokenSchema = z.object({
   curvePct: z.number().nonnegative().nullable().optional(),
   liquidityTon: z.number().nonnegative().nullable().optional(),
   holders: z.number().int().nonnegative().optional(),
+});
+
+export const LifecycleStateSchema = z.enum(["OPEN", "PARTIAL_EXIT", "FULL_EXIT", "SETTLED"]);
+
+export const SettlementStatusSchema = z.enum(["PENDING", "CONFIRMED", "FAILED"]);
+
+export const FillRecordSchema = z.object({
+  id: z.string(),
+  positionId: z.string(),
+  orderId: z.string(),
+  tokenAddress: z.string(),
+  action: z.enum(["BUY", "SELL"]),
+  qty: z.number().positive(),
+  priceTon: z.number().positive(),
+  feesTon: z.number().nonnegative(),
+  ts: z.number().positive(),
+  settlement: SettlementStatusSchema,
+  pnlTon: z.number().optional(),
+});
+
+export const PositionEventSchema = z.object({
+  type: LifecycleStateSchema,
+  positionId: z.string(),
+  ts: z.number().positive(),
+  payload: z.record(z.unknown()),
+  idempotencyKey: z.string().optional(),
 });
 
 export const AuditSchema = z.object({

@@ -5,7 +5,7 @@
  * processes them in order, and writes orders/fills journals with asynchronous
  * non-blocking priority queue management.
  */
-import { Journal, readJournal, validateIngested, createLogger, newId, type OrderRequest, type ExecutionMode } from "@openclaw-ton-agent/shared";
+import { Journal, readJournal, validateIngested, createLogger, newId, type OrderRequest, type ExecutionMode, globalResilience } from "@openclaw-ton-agent/shared";
 import { openPosition, stepPosition, type Position } from "@openclaw-ton-agent/exit-manager";
 import { EXEC_CONFIG } from "./config";
 import { buildOrderRequest } from "./order-builder";
@@ -134,6 +134,7 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
   log.info("initialized open positions tracker", { activeCount: openPositionsMap.size });
 
   let liveTradeCount = 0;
+  let getQueueDepth = () => ({ high: 0, normal: 0, total: 0 });
   const stats: HealthStats = {
     processedFiles: 0,
     totalOrders: 0,
@@ -196,6 +197,9 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
     }
   );
 
+  // Wire metrics to queue depth after orderQueue is created
+  getQueueDepth = () => orderQueue.size();
+
   const existingOrders = fs.existsSync(opts.ordersOut) ? readJournal(opts.ordersOut) : [];
   const processedEnvIds = new Set<string>();
   for (const o of existingOrders) {
@@ -208,13 +212,30 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
   const processedFiles = new Set<string>();
   const processedLines = new Map<string, number>();
 
-  // Health server
-  let healthServer: ReturnType<typeof createHealthServer> | null = null;
+  const metrics: Record<string, unknown> = {
+    processedFiles: 0,
+    totalOrders: 0,
+    liveTradeCount: 0,
+    openPositions: 0,
+    queueDepth: { high: 0, normal: 0, total: 0 },
+    uptimeSec: 0,
+    lastError: null as string | null,
+  };
+
+  const healthServer: ReturnType<typeof createHealthServer> | null = null;
   if (opts.healthPort) {
-    healthServer = createHealthServer(opts.healthPort, () => ({
-      ...stats,
-      uptimeSec: Math.floor((Date.now() - startTime) / 1000),
-    }));
+    healthServer = createHealthServer(
+      opts.healthPort,
+      () => ({
+        ...stats,
+        uptimeSec: Math.floor((Date.now() - startTime) / 1000),
+      }),
+      () => ({
+        ...metrics,
+        queueDepth: getQueueDepth(),
+        uptimeSec: Math.floor((Date.now() - startTime) / 1000),
+      })
+    );
   }
 
   const processFile = async (filePath: string) => {
@@ -273,8 +294,11 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
     if (!processedFiles.has(fileName)) {
       processedFiles.add(fileName);
       stats.processedFiles++;
+      metrics.processedFiles++;
     }
     stats.totalOrders += fileOrders;
+    metrics.totalOrders += fileOrders;
+    metrics.queueDepth = getQueueDepth();
     stats.lastProcessedAt = Date.now();
     log.info("completed gated file ingestion", { fileName, newOrders: fileOrders, totalOrders: stats.totalOrders });
   };
@@ -304,6 +328,17 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
       await Promise.allSettled(
         entries.map(async ([address, pos]) => {
           try {
+            // OPEN-only monitoring enforcement: skip positions not in OPEN or PARTIAL_EXIT state
+            if (pos.lifecycleState && pos.lifecycleState !== "OPEN" && pos.lifecycleState !== "PARTIAL_EXIT") {
+              return;
+            }
+
+            // Duplicate-exit guard: skip if exit is already in-flight
+            if (pos.activeExitOrderId) {
+              log.debug("skipping position stepping, exit in-flight", { ticker: pos.ticker, activeExitOrderId: pos.activeExitOrderId });
+              return;
+            }
+
             const currentPriceTon = await fetchCurrentPriceTon(address, pos.entryTon);
             const step = stepPosition(pos, currentPriceTon, now);
             openPositionsMap.set(address, step.pos);
@@ -339,8 +374,17 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
                 return;
               }
 
+              const exitOrderId = newId("ord");
+              // Mark active exit order on the position to prevent duplicate exits
+              const posWithExitInFlight = {
+                ...step.pos,
+                activeExitOrderId: exitOrderId,
+                lifecycleState: step.action === "exit" ? ("FULL_EXIT" as const) : ("PARTIAL_EXIT" as const),
+              };
+              openPositionsMap.set(address, posWithExitInFlight);
+
               const sellOrder: OrderRequest = {
-                id: newId("ord"),
+                id: exitOrderId,
                 ts: now,
                 gatedEnvelopeId: pos.orderId,
                 source: "exit-manager",
@@ -361,7 +405,7 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
                 slippageBps: EXEC_CONFIG.slippageBps,
                 deadlineMs: now + 60_000,
                 minOutTokenQty: 0,
-                expectedTokenQty: pos.qty,
+                expectedTokenQty: pos.remainingQty ?? pos.qty,
                 rRatio: 1.5,
                 expectedValueTon: 0.1,
               };
@@ -384,9 +428,14 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
                 if (sellRes.fill?.status === "bounced") {
                   log.info("clearing bounced/unsellable position", { ticker: pos.ticker, reason: sellRes.fill?.reason });
                 }
+                const settledPos = {
+                  ...posWithExitInFlight,
+                  lifecycleState: "SETTLED" as const,
+                  activeExitOrderId: null,
+                };
                 positionsJournal.append({
                   kind: "position.closed",
-                  pos: step.pos,
+                  pos: settledPos,
                   action: step.action,
                   reason: sellRes.fill?.status === "bounced" ? (isNoPool ? "unsellable_no_pool" : "zero_balance") : step.reason,
                   exitPriceTon: step.exitPriceTon,
@@ -396,14 +445,15 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
                 orderQueue.notifySlotAvailable();
               } else {
                 const bounceCount = (step.pos.bounceCount ?? 0) + 1;
-                const updatedPos = { ...step.pos, bounceCount };
+                // Clear activeExitOrderId so it can retry later
+                const updatedPos = { ...step.pos, bounceCount, activeExitOrderId: null };
                 openPositionsMap.set(address, updatedPos);
 
                 if (bounceCount >= 3) {
                   log.warn("force-clearing stuck position after consecutive bounces", { ticker: pos.ticker, bounces: bounceCount, reason: sellRes.fill?.reason });
                   positionsJournal.append({
                     kind: "position.closed",
-                    pos: updatedPos,
+                    pos: { ...updatedPos, lifecycleState: "SETTLED" as const },
                     action: step.action,
                     reason: `force_cleared: ${bounceCount} consecutive bounces (${sellRes.fill?.reason ?? "unknown"})`,
                     exitPriceTon: step.exitPriceTon,
@@ -469,15 +519,20 @@ export async function runContinuousExecutor(opts: ContinuousExecutorOpts) {
 let _cachedTonPriceUsd = 1.30;
 let _lastTonPriceFetch = 0;
 
+const stonFiBreaker = globalResilience.getBreaker("ston-fi", { failureThreshold: 5, resetTimeoutMs: 15_000 });
+const dedustBreaker = globalResilience.getBreaker("dedust", { failureThreshold: 5, resetTimeoutMs: 15_000 });
+
 async function getTonPriceUsd(): Promise<number> {
   const now = Date.now();
   if (now - _lastTonPriceFetch < 60_000 && _cachedTonPriceUsd > 0) {
     return _cachedTonPriceUsd;
   }
   try {
-    const res = await fetch("https://api.ston.fi/v1/assets/EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c", {
-      signal: AbortSignal.timeout(4_000),
-    });
+    const res = await stonFiBreaker.execute(() =>
+      fetch("https://api.ston.fi/v1/assets/EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c", {
+        signal: AbortSignal.timeout(4_000),
+      })
+    );
     if (res.ok) {
       const data = (await res.json()) as { asset?: { dex_usd_price?: string; third_party_usd_price?: string } };
       const p = Number(data.asset?.dex_usd_price ?? data.asset?.third_party_usd_price);
@@ -497,9 +552,11 @@ async function fetchCurrentPriceTon(address: string, fallbackPriceTon: number): 
   }
   // 1. Try STON.fi API
   try {
-    const res = await fetch(`https://api.ston.fi/v1/assets/${address}`, {
-      signal: AbortSignal.timeout(3_000),
-    });
+    const res = await stonFiBreaker.execute(() =>
+      fetch(`https://api.ston.fi/v1/assets/${address}`, {
+        signal: AbortSignal.timeout(3_000),
+      })
+    );
     if (res.ok) {
       const data = (await res.json()) as { asset?: { dex_usd_price?: string; third_party_usd_price?: string } };
       const priceUsd = Number(data.asset?.dex_usd_price ?? data.asset?.third_party_usd_price);
@@ -512,9 +569,11 @@ async function fetchCurrentPriceTon(address: string, fallbackPriceTon: number): 
 
   // 2. Try DeDust API
   try {
-    const res = await fetch("https://api.dedust.io/v2/pools", {
-      signal: AbortSignal.timeout(3_000),
-    });
+    const res = await dedustBreaker.execute(() =>
+      fetch("https://api.dedust.io/v2/pools", {
+        signal: AbortSignal.timeout(3_000),
+      })
+    );
     if (res.ok) {
       const pools = (await res.json()) as Array<{ assets: Array<{ type: string; address?: string }>; lastPrice?: string }>;
       if (Array.isArray(pools)) {
@@ -531,12 +590,17 @@ async function fetchCurrentPriceTon(address: string, fallbackPriceTon: number): 
   return fallbackPriceTon;
 }
 
-function createHealthServer(port: number, getStats: () => HealthStats) {
+function createHealthServer(port: number, getStats: () => HealthStats, getMetrics?: () => Record<string, unknown>) {
   const http = require("http");
   const server = http.createServer((req: any, res: any) => {
     if (req.url === "/health" || req.url === "/health/ready") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok", ...getStats() }));
+      return;
+    }
+    if (req.url === "/metrics" && getMetrics) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(getMetrics()));
       return;
     }
     res.writeHead(404);

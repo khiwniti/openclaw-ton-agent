@@ -1,0 +1,123 @@
+schema_version: 1.0.0
+primary:
+  claim: Replacing in-memory Position mutation with a journal-backed Position State
+    Machine (OPEN → PARTIAL_EXIT* → FULL_EXIT → SETTLED) where every transition writes
+    a versioned event with the full position snapshot will eliminate the 5 correctness
+    gaps (lifecycle state, duplicate-exit, remaining qty, settlement-based close,
+    durable P&L) by making the append-only journal the single source of truth for
+    all financial state.
+  mechanism: "1. **PositionStateMachine** replaces direct `Position` mutation in `stepPosition`.\
+    \ `stepPosition` returns a `TransitionIntent` { fromState, toState, exitPrice,\
+    \ exitSizePct, idempotencyKey, reason } instead of mutating `Position`.\n\n2.\
+    \ **Journal-backed transitions**: A new `PositionJournal` (append-only, per-position\
+    \ or partitioned) records `PositionEvent`:\n   - `OPEN`: { version: 1, state:\
+    \ \"OPEN\", pos: PositionSnapshot, ts }\n   - `PARTIAL_EXIT`: { version: n, state:\
+    \ \"PARTIAL_EXIT\", pos: PositionSnapshot, exit: { price, sizePct, action }, settlement:\
+    \ \"PENDING\", ts, idempotencyKey }\n   - `FULL_EXIT`: { version: n, state: \"\
+    FULL_EXIT\", pos: PositionSnapshot, exit: { price, action }, settlement: \"PENDING\"\
+    , ts, idempotencyKey }\n   - `SETTLED`: { version: n, state: \"SETTLED\", pos:\
+    \ PositionSnapshot, settlement: { proven: true, txHash, actualQty, pnlTon }, ts\
+    \ }\n\n3. **In-memory Position as pure projection**: `reconstructPosition(tokenAddress)`\
+    \ folds the journal from `OPEN` through latest event → current `Position` with\
+    \ correct `remainingQty`, `partialTakesHit`, `highWaterTon`, etc. No local mutation\
+    \ ever.\n\n4. **Settlement-gated P&L**: `FULL_EXIT`/`PARTIAL_EXIT` events carry\
+    \ `settlement: \"PENDING\"`. Only after `ton-settlement` proves the fill (`proven:\
+    \ true`) is a `SETTLED` event appended. P&L is booked **only** on `SETTLED`.\n\
+    \n5. **Idempotency keys**: Every `TransitionIntent` gets a deterministic `idempotencyKey\
+    \ = hash(tokenAddress, fromVersion, action, exitPrice)`. The executor checks the\
+    \ journal for an existing event with that key before enqueueing a sell order.\
+    \ Duplicate `stepPosition` calls (e.g., after restart) produce the same key →\
+    \ no duplicate order.\n"
+  prediction: '- **Zero duplicate exits**: On forced restart mid-exit, the same `idempotencyKey`
+    is generated; the journal already contains the `PARTIAL_EXIT`/`FULL_EXIT` event
+    → executor skips re-enqueueing. Measured as 0 duplicate sell orders per 1000 restarts
+    in chaos testing.
+
+    - **Exact remainingQty reconstruction**: After N partial exits, `reconstructPosition`
+    yields `remainingQty` within 1e-9 of the mathematical expectation (originalQty
+    × Π(1 - sizePct_i)). Verified by property-based test over 10,000 random partial-exit
+    sequences.
+
+    - **P&L durability**: After kill -9 at any point, `SELECT SUM(pnlTon) FROM settled_events`
+    matches the on-chain realized P&L within 0.01 TON (settlement tolerance). Tested
+    via fault injection at each transition boundary.
+
+    - **Latency overhead**: Journal append + fold adds <2ms p99 per `stepPosition`
+    call (current: ~0.5ms). Acceptable for 5s polling interval.
+
+    '
+  experiment: '1. **Prototype**: Implement `PositionJournal` + `PositionStateMachine`
+    in `packages/exit-manager/src/state-machine.ts` with in-memory journal first,
+    then wire to NDJSON.
+
+    2. **Property tests**: Use `fast-check` to generate random sequences of price
+    ticks → `stepPosition` calls → verify `reconstructPosition` matches a reference
+    implementation that mutates in-memory state.
+
+    3. **Chaos test**: Run continuous executor against paper wallet; inject `SIGKILL`
+    at random points during exit processing; on restart, verify: (a) no duplicate
+    sells, (b) `remainingQty` matches, (c) P&L only booked for `SETTLED` events.
+
+    4. **Settlement integration**: Mock `ton-settlement` to return `proven: true/false`;
+    verify `SETTLED` event only appended on `proven: true`; verify `FULL_EXIT` without
+    settlement stays `PENDING` and blocks P&L.
+
+    5. **Benchmark**: Measure `stepPosition` latency with journal fold vs. current
+    mutation (target: <2ms p99).
+
+    '
+  tension_resolution: 'The journal-first architecture currently only journals `position.open`
+    and `position.closed` — intermediate financial state (remainingQty, partial take
+    hits, highWaterMark, settlement status) lives only in volatile memory. This hypothesis
+    resolves the tension by **extending the journal to be the authoritative ledger
+    for every position state transition**, not just open/close. The append-only property
+    is preserved (events are immutable, versioned, idempotent), but the journal now
+    captures the *complete* financial lifecycle. The in-memory `Position` becomes
+    a derived view, eliminating the divergence between journal and memory that causes
+    the 5 correctness gaps.
+
+    '
+dialectical_fork:
+  fork: Whether settlement proof should be a synchronous gate on the exit order (blocking
+    the queue) or an asynchronous transition (FULL_EXIT → PENDING → SETTLED).
+  path_a: '**Synchronous settlement gate**: The sell order is not considered "executed"
+    until `ton-settlement` proves the fill. The `OrderQueueManager` blocks on the
+    high-priority exit until settlement confirmation (with timeout → `pending_reconcile`).
+    Pros: Simpler mental model, P&L never booked on unproven fills, queue naturally
+    handles backpressure. Cons: Exit latency increases by settlement polling time
+    (~10-30s); a stuck settlement blocks the high-priority queue, delaying other exits.
+
+    '
+  path_b: '**Asynchronous settlement transition (chosen)**: `FULL_EXIT`/`PARTIAL_EXIT`
+    events are appended immediately with `settlement: "PENDING"`. The queue moves
+    on. A background reconciler polls `ton-settlement` and appends `SETTLED` when
+    proven. Unproven fills stay `PENDING` and are surfaced to operator. Pros: Exit
+    latency stays low (~ms); high-priority queue never blocked; operator has visibility
+    into unproven fills. Cons: Requires `reconstructPosition` to handle `PENDING`
+    state; P&L reporting must filter `settled: true` only.
+
+    '
+alternatives:
+- claim: 'Dual-write to SQLite + NDJSON: use SQLite WAL as the authoritative position
+    store with ACID transactions for state transitions; NDJSON remains audit log.'
+  key_bet: SQLite transactions can coordinate the exit decision + order enqueue +
+    state update atomically, eliminating the need for idempotency keys and journal
+    folding. Assumes single-writer (no distributed executor).
+- claim: 'Event sourcing with Kafka/Redis Streams: replace NDJSON with a durable log
+    that supports consumer groups and exactly-once semantics.'
+  key_bet: Infrastructure complexity (Kafka/Redis) is justified by the need for horizontal
+    scaling of the executor; the current single-node Fly.io deployment doesn't need
+    this yet.
+recommended_next_steps:
+- 'Validate: Add a `reconstructPosition` integration test that reads `positions-mainnet.ndjson`
+  + `orders-mainnet.ndjson` + `fills-mainnet.ndjson` and verifies `remainingQty` matches
+  a known-good reference after partial exits.'
+- 'Prototype: Implement `PositionStateMachine` + in-memory `PositionJournal` in `exit-manager`;
+  wire into `continuous.ts` to replace the `openPositionsMap` mutation logic.'
+- 'Read: `skills/ton-settlement/SKILL.md` and `packages/executor/src/acton/verify.ts`
+  to confirm the settlement proof interface and timeout behavior before designing
+  the `SETTLED` transition.'
+human_summary: Journal-first architecture currently only journals position.open/close
+  — intermediate financial state lives in volatile memory. Extend the journal to be
+  the authoritative ledger for every position state transition via a Position State
+  Machine with versioned events, idempotency keys, and settlement-gated P&L.

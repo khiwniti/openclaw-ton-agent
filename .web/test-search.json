@@ -1,0 +1,16 @@
+{
+  "data": {
+    "web": [
+      {
+        "url": "https://github.com/ultimate-pi/ultimate-pi",
+        "title": "ultimate-pi/ultimate-pi: Ultimate PI - Agentic Harness",
+        "description": "The ultimate-pi agentic harness provides architecture, research, decisions, and implementation for AI agent workflows."
+      },
+      {
+        "url": "https://github.com/ultimate-pi/ultimate-pi/tree/main/.pi/scripts",
+        "title": "ultimate-pi/.pi/scripts at main",
+        "description": "Harness CLI scripts including harness-cli-verify.sh, harness-graphify-bootstrap.sh, and harness-web.py"
+      }
+    ]
+  }
+}

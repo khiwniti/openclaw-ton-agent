@@ -1,0 +1,231 @@
+ ▐▛███▜▌   Claude Code v2.1.233
+▝▜█████▛▘  Sonnet 5 · API Usage Billing
+  ▘▘ ▝▝    ~/openclaw-ton-agent
+
+
+❯ /clear                                                                        
+
+❯ /oh-my-claude:prime please help me review whole tradig system again for       
+potential gap . for one error that still occured , on prod closing logic not    
+working properlly (sniping order >30min still hold., etc.) and more over i used 
+to trade with https://app.allox.ai/ look like they have advance technique that  
+after swap with main chain -> pancake swap even something i am not sure , if    
+our system required please add it too . dont forgaet to use dewpwiki mcp ,      
+chain thought and ton skill for highly efficient                                
+
+● I'll invoke the relevant skills before diving in.
+
+● Skill(superpowers:using-superpowers)
+  ⎿  Successfully loaded skill
+
+● Using deepwiki, ton skill, and superpowers:brainstorming to tackle this
+  comprehensive trading system review.
+
+  Let me first invoke the required skills, then launch parallel subagents to
+  maximize efficiency.
+
+● Skill(deepwiki)
+  ⎿  Successfully loaded skill
+
+● Skill(ton-docs)
+  ⎿  Successfully loaded skill
+
+● Skill(superpowers:brainstorming)
+  ⎿  Successfully loaded skill
+
+● This is an Architectural task — reviewing the entire trading system, fixing a
+  known prod bug (positions not closing after 30+ min), and potentially adding
+  DEX routing techniques. I'll explore the codebase in parallel before
+  brainstorming approaches.
+
+● 3 background agents launched (↓ to manage)
+   ├ oh-my-claude:librarian (Read trading system core files)
+   ├ oh-my-claude:librarian (Read scanner and signal pipeline)
+   └ deep-research (Research allox.ai DEX routing techniques)
+
+● Three subagents are running in parallel. Waiting for their findings before
+  synthesizing the review.
+
+✻ Crunched for 55s
+
+❯ /model                                                                        
+  ⎿  Set model to Sonnet 5 and saved as your default for new sessions
+
+● Agent "Read scanner and signal pipeline" was stopped by user
+
+● One agent was stopped. Still waiting on the other two. I'll check what's
+  available from the codebase directly while waiting.
+
+  Listed 1 directory (ctrl+o to expand)
+
+● Good — now reading the critical closing logic files in parallel.
+
+  Read 3 files (ctrl+o to expand)
+
+● Good — now reading the executor and position tracking to find the closing bug.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+❯ look lijw mutiagent wss not support with this proxy.                          
+
+● Got it — the multi-agent WebSocket connections aren't working through this
+  proxy. I'll keep everything single-agent from here. Let me continue reading
+  the critical files directly.
+
+  Read 2 files (ctrl+o to expand)
+
+● Now I have a thorough picture of the system. Let me check the acton-wallet
+  (which actually executes swaps) and the position tracking to nail the closing
+  bug.
+
+  Read 2 files (ctrl+o to expand)
+
+● Now I have a thorough picture of the whole system. Let me synthesize the full
+  analysis.
+
+  ---
+  Trading System Review — Full Audit
+
+  Classification: Architectural review + Bounded bug fix
+
+  ---
+  1. ROOT CAUSE: Closing Logic Bug (30+ min positions stuck)
+
+  I found the bug. There are two interlocking issues:
+
+  Bug A — time_stop check is LAST in precedence (decide.ts:243)
+
+  In stepPosition(), the time-stop check is at the very bottom of the exit
+  precedence chain. The order is:
+  ladder_exit → partial_tp → trend_reversal → break_even/trail → tp → sl →
+  time_stop
+
+  The problem: for a sniping position that never hit its high-water mark (price
+  went sideways or slightly down), trailingStopTon stays null (line 87: only
+  arms when highWaterTon > pos.entryTon). This means the effectiveStop =
+  -Infinity, so trail/break-even never fire. The position sits waiting for price
+  to never come, and time_stop is checked last but...
+
+  Bug B — Position reconstructed from orders journal with WRONG entryTs 
+  (continuous.ts:110)
+
+  On restart/boot, positions are reconstructed from the orders journal (lines
+  95–121). The entry timestamp is set to ord.ts || Date.now(). But ord.ts is the
+  order submission time, not the fill time. If the order object doesn't have ts
+  populated correctly, it falls back to Date.now() — resetting the clock on 
+  every restart. So a 35-minute-old position gets reconstructed with entryTs = 
+  now, and the 30-minute time-stop never fires because the clock keeps getting
+  reset.
+
+  Bug C — stepPosition called with stale pos.entryTs after bounce 
+  (continuous.ts:368–386)
+
+  When a sell bounces (not zero-balance, not manual override), line 369 updates
+  bounceCount but step.pos already has updated highWaterTon/trailingStopTon. The
+  next poll evaluates step.pos again via openPositionsMap.get(address) — but
+  step.pos.entryTs is from the original position, so that part is fine. However,
+  the bounce count logic means a bouncing position can hold for 3 cycles × 
+  5-second poll = 15 seconds before force-clear, which is acceptable. The real
+  issue is Bug B.
+
+  Bug D — Price fetch failure silently uses pos.entryTon as current price 
+  (continuous.ts:277–289)
+
+  If the STON.fi API call fails (network timeout, etc.), currentPriceTon = 
+  pos.entryTon. This means stepPosition sees "price == entry" — so trailing stop
+  never arms (needs highWaterTon > entryTon), TP never hits, SL never triggers.
+  The position is effectively frozen whenever the price API is unreachable. The
+  time_stop would still fire... if Bug B wasn't also present.
+
+  ---
+  2. Other System Gaps
+
+  Gap E — pos.qty used in sell order but never set (continuous.ts:337)
+
+  expectedTokenQty: pos.qty,
+  Position.qty is not set anywhere in the openPosition() call on buy (lines
+  213–230). It will be undefined → 0. The sell order goes out with
+  expectedTokenQty: 0, which makes minOutTokenQty: 0 (no slippage protection on
+  exits).
+
+  Gap F — STON.fi V1 vs V2 ambiguity
+
+  The acton-wallet.ts hardcodes STON.fi V1 opcode 0x25938561 and V1 router.
+  STON.fi V2 (Ston.fi API v1 returns V2 pools by default). If a token only has a
+  V2 pool, the swap silently fails pool-active check or routes to a dead pool.
+
+  Gap G — No DEX aggregation / best-route selection
+
+  Currently the system buys and sells exclusively on STON.fi V1, with DeDust as
+  an optional path in router.ts but toSwapPayload() in acton-wallet hardcodes
+  dex: "stonfi" (line 158). The DEX selection logic in router.ts / executeSwap()
+  is never actually called from acton-wallet.ts — it's dead code for the hot
+  path.
+
+  Gap H — Sell gas value too low for DeDust (router.ts:790)
+
+  DeDust sell uses toNano("0.35") as msg value but acton-wallet sell uses
+  toNano("0.20"). On congested mainnet, 0.20 TON is borderline for jetton
+  transfer + swap execution fees.
+
+  ---
+  3. Regarding allox.ai Advanced Techniques
+
+  From what I can observe in the system + TON DEX knowledge:
+
+  The technique you're seeing on allox.ai is likely STON.fi V2 multi-hop 
+  routing: TON → pTON → [hop via intermediate token] → target. This is used for
+  tokens that only have liquidity against USDT or another jetton (not direct TON
+  pair). On STON.fi V2, you can chain pools in a single transaction using a
+  referral_address + next_pool_addr pattern in the forward payload.
+
+  What our system is missing:
+  - STON.fi V2 support (newer router address)
+  - Multi-hop routing for tokens without a direct TON pool
+  - Quote comparison: STON.fi v2 vs DeDust before executing (best price routing)
+  - The allox.ai "after swap" step is likely a referral/fee split + confirmation
+  that the swap landed in V2
+
+  ---
+  4. Proposed Fixes (Bounded)
+
+  Here's my proposed design before I touch any code:
+
+  Fix 1 — entryTs preservation on boot (continuous.ts:110)
+  Use ord.ts for the position entryTs, but add a cap: if ord.ts is 0 or missing,
+  use Date.now() - 1 (not Date.now()), and log a warning. More importantly,
+  when reconstructing from the positions journal (lines 71–82), trust the
+  journal's pos.entryTs directly — don't recalculate.
+
+  Fix 2 — Price fetch failure: force time-stop evaluation regardless of price 
+  (continuous.ts:277)
+  When the price API fails, still call stepPosition with pos.entryTon but check
+  age separately: if now - pos.entryTs >= pos.timeStopMs, force-close without
+  needing a price quote.
+
+  Fix 3 — Set pos.qty on position open (continuous.ts:213)
+  Derive qty from expectedTokenQty of the buy order.
+
+  Fix 4 — Bump sell gas to 0.25 TON minimum in acton-wallet.
+
+  ---
+  Before I implement any of these, do you want me to:
+
+  1. Start with just the closing bug fixes (Fixes 1–3, highest urgency)?
+  2. Also add STON.fi V2 / DEX routing (larger scope, needs more research)?
+  3. Both in one go?
+
+  Also: for the allox.ai technique — do you want me to look at STON.fi V2 docs
+  specifically to confirm the multi-hop routing opcode before we implement it?
+
+✻ Churned for 1m 56s
+
+● No completion record was found for 2 background agents from the previous
+session: "Read trading system core files" (a83dfccc1407ec9bb), "Research
+allox.ai DEX routing techniques" (a0e4675e0c4c1c48b). They may have been
+stopped, or they may have been running when the previous Claude Code process
+exited — either way their transcripts are saved on disk, so their progress is
+not lost. Resume any of them by sending a message to its id with SendMessage, or
+check its worktree/output for partial work before assuming the task landed.
+  ⎿  Not logged in · Please run /login
+✻ Churned for 1s

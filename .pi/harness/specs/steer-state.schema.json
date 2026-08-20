@@ -15,13 +15,6 @@
 		"last_review_tier": {
 			"type": "string",
 			"enum": ["full", "lite"]
-		},
-		"hygiene_repairs": {
-			"type": "integer",
-			"minimum": 0
-		},
-		"burst_used": {
-			"type": "boolean"
 		}
 	}
 }

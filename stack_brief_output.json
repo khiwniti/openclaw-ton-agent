@@ -1,0 +1,257 @@
+{
+  "task_summary": "Research TON-specific stack: ton-settlement skill, verify.ts interface, SQLite WAL multi-process patterns, existing OpenClaw journal schema, acton-wallet FillResult/pending_reconcile flow. Provide concrete API signatures and integration points.",
+  "brownfield": true,
+  "constraints": [
+    "Existing monorepo with 13 packages",
+    "Multi-process Fly.io deployment (API, Scanner, Risk Gates, Executor)",
+    "TON blockchain with STON.fi/DeDust DEX routing",
+    "Append-only NDJSON journals + SQLite WAL for persistence",
+    "Settlement proof (99% delta) mandatory on every fill"
+  ],
+  "options": [
+    {
+      "rank": 1,
+      "name": "Extend Current Stack (Recommended for Brownfield)",
+      "description": "Incrementally integrate ton-settlement skill as async reconciler behind existing FillResult.pending_reconcile flow, using verify.ts helpers and SQLite WAL for position state machine",
+      "pros": [
+        "Zero migration risk — leverages existing WalletAdapter/FillResult contract",
+        "verify.ts already provides computeDeliveredIncrement, readUserJettonBalance, verifyBuyDelivered, verifySellExecuted",
+        "SQLite WAL (busy_timeout=5000ms) already handles multi-process contention",
+        "Journal schema (positions, decision_journal, agentic_wallets) is stable",
+        "acton-wallet returns pending_reconcile with txHash — perfect settlement trigger",
+        "OrderQueueManager already separates HIGH (exits) vs NORMAL (buys) priority"
+      ],
+      "cons": [
+        "NDJSON journals not ACID — need PositionJournal for intermediate state",
+        "No existing background reconciler process — must add new process/worker",
+        "Idempotency keys for duplicate-exit prevention not yet implemented"
+      ],
+      "risks": [
+        "Medium: Journal folding latency (<2ms p99 target per hypothesis)",
+        "Low: SQLite WAL contention under high concurrent writes (mitigated by busy_timeout)"
+      ],
+      "migration_path": [
+        "1. Add PositionJournal (NDJSON per-position or partitioned) in exit-manager",
+        "2. Implement PositionStateMachine returning TransitionIntent (not mutating Position)",
+        "3. Wire ton-settlement skill as async background reconciler polling fillsJournal",
+        "4. Add SETTLED event only on proven: true; P&L booked only on SETTLED",
+        "5. Add reconstructPosition(tokenAddress) folding journal from OPEN → latest",
+        "6. Add idempotencyKey = hash(tokenAddress, fromVersion, action, exitPrice) to prevent duplicate sells"
+      ],
+      "evidence_refs": [
+        {
+          "id": "verify.ts",
+          "path": "packages/executor/src/acton/verify.ts",
+          "grade": "primary",
+          "type": "official_docs",
+          "key_apis": [
+            "computeDeliveredIncrement({balanceBefore, balanceAfter}): bigint | null",
+            "readUserJettonBalance(client, master, userWallet): Promise<bigint | null>",
+            "verifyBuyDelivered({client, master, walletAddress, expectedNano, balanceBefore, attempts?, delayMs?}): Promise<{ok, error, actualBalance}>",
+            "verifySellExecuted({client, master, walletAddress, soldNano, balanceBefore, attempts?, delayMs?}): Promise<{ok, error, balanceBefore, balanceAfter}>",
+            "verifySellDelta({balanceBefore, balanceAfter, soldNano}): {ok, error}"
+          ]
+        },
+        {
+          "id": "acton-wallet.ts",
+          "path": "packages/executor/src/acton/acton-wallet.ts",
+          "grade": "primary",
+          "type": "official_docs",
+          "key_apis": [
+            "FillResult {status: 'filled'|'bounced'|'pending_reconcile', txHash, filledAmountTon, filledTokenQty, minOutTokenQty, slippageBps, mode, reason?}",
+            "swap(order: OrderRequest): Promise<FillResult> — returns pending_reconcile with txHash on broadcast success",
+            "WalletMutex sequential lock with seqno confirmation polling (20s timeout)",
+            "Multi-DEX routing: STON.fi direct, DeDust direct, USDT multi-hop (both DEXes)"
+          ]
+        },
+        {
+          "id": "wallet.ts",
+          "path": "packages/executor/src/wallet.ts",
+          "grade": "primary",
+          "type": "official_docs",
+          "key_apis": [
+            "WalletAdapter {name, swap(order): Promise<FillResult>}",
+            "PaperWallet (deterministic), TonMcpWallet (delegates to ActonWallet)",
+            "FillStatus = 'filled' | 'bounced' | 'pending_reconcile'"
+          ]
+        },
+        {
+          "id": "ton-settlement-skill",
+          "path": "skills/ton-settlement/SKILL.md",
+          "grade": "primary",
+          "type": "official_docs",
+          "key_apis": [
+            "Workflow: pre-swap balance → poll post-swap → |delta-expected|/expected ≤ 99% → proven",
+            "Output: {proven: boolean, expected, actual, tolerance, txHash}",
+            "Unproven fills remain pending_reconcile, surfaced to operator"
+          ]
+        },
+        {
+          "id": "storage-store",
+          "path": "packages/storage/src/store.ts",
+          "grade": "primary",
+          "type": "official_docs",
+          "key_apis": [
+            "better-sqlite3 v11.6.0 with journal_mode=WAL, busy_timeout=5000ms",
+            "Tables: positions, daily_pnl, decision_journal, agentic_wallets",
+            "store.insert(table, row), store.query(table, where?, params?)"
+          ]
+        },
+        {
+          "id": "journal-schema",
+          "path": "packages/shared/src/journal.ts",
+          "grade": "primary",
+          "type": "official_docs",
+          "key_apis": [
+            "Journal.append(event), Journal.tail(max), Journal.lineCountValue",
+            "NDJSON files: signals-*, gated-*, orders-*, fills-*, positions-*",
+            "Rotation via maxBytes option"
+          ]
+        },
+        {
+          "id": "continuous-executor",
+          "path": "packages/executor/src/continuous.ts",
+          "grade": "primary",
+          "type": "official_docs",
+          "key_apis": [
+            "runContinuousExecutor({gatedDir, ordersOut, fillsOut, mode, pollIntervalMs, healthPort})",
+            "openPositionsMap restored from positionsJournal + ordersJournal",
+            "OrderQueueManager with HIGH/NORMAL priority, notifySlotAvailable()",
+            "Position stepping every 5s via stepPosition from exit-manager"
+          ]
+        },
+        {
+          "id": "exit-manager-decide",
+          "path": "packages/exit-manager/src/decide.ts",
+          "grade": "primary",
+          "type": "official_docs",
+          "key_apis": [
+            "stepPosition(pos, priceTon, now, candleClose?): StepResult {action, exitPriceTon, pos, reason, exitSizePct?}",
+            "ExitAction: hold | tp | sl | break_even | trail | time_stop | partial_tp | trend_reversal | momentum_reversal | ladder_exit | structure_sl | blocked",
+            "8-tier precedence: time_stop → ladder_exit → partial_tp → momentum_reversal → trend_reversal → break_even/trail → structure_sl → tp/sl"
+          ]
+        },
+        {
+          "id": "hypothesis-yaml",
+          "path": ".pi/harness/runs/run-openclaw/artifacts/hypothesis.yaml",
+          "grade": "secondary",
+          "type": "design_doc",
+          "key_points": [
+            "PositionStateMachine with versioned events: OPEN → PARTIAL_EXIT* → FULL_EXIT → SETTLED",
+            "Settlement-gated P&L: FULL_EXIT/PARTIAL_EXIT carry settlement: 'PENDING', SETTLED only on proven: true",
+            "IdempotencyKey = hash(tokenAddress, fromVersion, action, exitPrice)",
+            "Async settlement transition (chosen): queue moves on, background reconciler polls ton-settlement",
+            "Dual-write SQLite + NDJSON alternative considered"
+          ]
+        },
+        {
+          "id": "arch-design",
+          "path": "docs/ARCHITECTURE_DESIGN.md",
+          "grade": "secondary",
+          "type": "architecture_doc",
+          "key_points": [
+            "7-layer pipeline: Scanner → Market Intel → Risk Gates → Order Queue → Execution → Exit Manager → Storage/API",
+            "Multi-process: API (3000), Scanner (8080), Risk Gates, Executor (8081)",
+            "SQLite WAL with busy_timeout=5000ms for zero-lock contention",
+            "NDJSON journals under /app/data/"
+          ]
+        }
+      ],
+      "selection_criteria": [
+        "Must preserve existing WalletAdapter/FillResult contract (zero breaking changes)",
+        "Must use verify.ts helpers for on-chain balance delta proofs (fail-closed)",
+        "Must work with SQLite WAL multi-process deployment (no distributed consensus needed)",
+        "Must integrate with existing NDJSON journal rotation and tail() reads",
+        "Must support async settlement (queue never blocked on high-priority exits)",
+        "Must provide idempotency for crash-recovery duplicate-exit prevention"
+      ]
+    },
+    {
+      "rank": 2,
+      "name": "Dual-Write SQLite WAL + NDJSON (Alternative)",
+      "description": "Use SQLite WAL as authoritative position store with ACID transactions for state transitions; NDJSON remains audit log",
+      "pros": [
+        "ACID transactions coordinate exit decision + order enqueue + state update atomically",
+        "Eliminates need for idempotency keys and journal folding",
+        "better-sqlite3 already in use with WAL mode",
+        "Single-writer assumption holds (current Fly.io deployment)"
+      ],
+      "cons": [
+        "Schema migration required for PositionStateMachine tables",
+        "Dual-write complexity (must keep SQLite + NDJSON in sync)",
+        "Loss of pure append-only audit property for intermediate states",
+        "More invasive change than journal-first approach"
+      ],
+      "risks": [
+        "High: Transaction contention under concurrent executor + API writes",
+        "Medium: Schema evolution risk for financial state machine"
+      ],
+      "evidence_refs": [
+        {"id": "hypothesis-yaml", "ref": "alternatives[0]", "grade": "secondary"},
+        {"id": "storage-store", "ref": "tables: positions, decision_journal", "grade": "primary"}
+      ]
+    },
+    {
+      "rank": 3,
+      "name": "Event Sourcing with Kafka/Redis Streams (Future Scale)",
+      "description": "Replace NDJSON with durable log supporting consumer groups and exactly-once semantics",
+      "pros": [
+        "Horizontal scaling of executor consumers",
+        "Exactly-once semantics eliminate idempotency key complexity",
+        "Replayable event log for backtesting/audit"
+      ],
+      "cons": [
+        "Infrastructure complexity (Kafka/Redis) not justified for single-node Fly.io",
+        "Operational overhead for small team",
+        "Breaks existing NDJSON tooling (tail, readJournal, grep)"
+      ],
+      "risks": [
+        "High: Premature optimization — current deployment doesn't need this",
+        "Medium: Migration cost from NDJSON → stream processing"
+      ],
+      "evidence_refs": [
+        {"id": "hypothesis-yaml", "ref": "alternatives[1]", "grade": "secondary"},
+        {"id": "arch-design", "ref": "multi-process single-node Fly.io", "grade": "secondary"}
+      ]
+    }
+  ],
+  "concrete_integration_points": {
+    "ton_settlement_skill_invocation": {
+      "trigger": "FillResult with status='pending_reconcile' appended to fillsJournal",
+      "polling_interval": "5-15s (configurable)",
+      "input": "{txHash, walletAddress, jettonMaster, expectedNano, side, balanceBefore}",
+      "output": "{proven: boolean, expected, actual, tolerance, txHash}",
+      "on_proven_true": "Append SETTLED event to PositionJournal; book P&L in SQLite positions table",
+      "on_proven_false": "Leave FULL_EXIT/PARTIAL_EXIT as settlement='PENDING'; surface to operator dashboard"
+    },
+    "verify_ts_integration": {
+      "buy_verification": "verifyBuyDelivered({client, master, walletAddress, expectedNano: order.minOutTokenQty * 10^decimals, balanceBefore: preBuyBalance, attempts: 5, delayMs: 1500})",
+      "sell_verification": "verifySellExecuted({client, master, walletAddress, soldNano: order.jettonAmountNano, balanceBefore: preSellBalance, attempts: 5, delayMs: 1500})",
+      "delta_computation": "computeDeliveredIncrement({balanceBefore, balanceAfter}) for both sides"
+    },
+    "sqlite_wal_patterns": {
+      "connection": "Single Store instance per process (better-sqlite3 with WAL + busy_timeout=5000ms)",
+      "multi_process": "Each Fly.io process (API, Executor, Coordinator) opens own connection to same agent.db",
+      "contention_handling": "busy_timeout=5000ms + WAL allows concurrent readers + single writer",
+      "position_upsert": "INSERT OR REPLACE INTO positions (id, wallet_tier, jetton_master, side, amount_ton, tx_hash, status, opened_at, closed_at, realized_pnl_ton, meta) VALUES (...)",
+      "decision_journal": "INSERT INTO decision_journal (id, cycle_id, agent, input_hash, cap_check_result, final_action, output, created_at) VALUES (...)"
+    },
+    "journal_schema_extension": {
+      "current_positions_journal": "positions-{network}.ndjson with kind='position.open'|'position.closed'",
+      "proposed_position_journal": "position-{tokenAddress}.ndjson with events: OPEN(v1), PARTIAL_EXIT(vN), FULL_EXIT(vN), SETTLED(vN)",
+      "event_structure": {
+        "OPEN": "{version: 1, state: 'OPEN', pos: PositionSnapshot, ts}",
+        "PARTIAL_EXIT": "{version: n, state: 'PARTIAL_EXIT', pos: PositionSnapshot, exit: {price, sizePct, action}, settlement: 'PENDING', ts, idempotencyKey}",
+        "FULL_EXIT": "{version: n, state: 'FULL_EXIT', pos: PositionSnapshot, exit: {price, action}, settlement: 'PENDING', ts, idempotencyKey}",
+        "SETTLED": "{version: n, state: 'SETTLED', pos: PositionSnapshot, settlement: {proven: true, txHash, actualQty, pnlTon}, ts}"
+      }
+    },
+    "acton_wallet_fillresult_flow": {
+      "buy_order": "ActonWallet.swap() → broadcast → returns {status: 'pending_reconcile', txHash, filledAmountTon, filledTokenQty: order.expectedTokenQty, ...}",
+      "sell_order": "ActonWallet.swap() → broadcast → returns {status: 'pending_reconcile', txHash, filledAmountTon, filledTokenQty: position.qty, ...}",
+      "bounced": "Returns {status: 'bounced', txHash: null, filledAmountTon: 0, filledTokenQty: 0, reason}",
+      "reconciliation_trigger": "fillsJournal.append({orderId, ...fillResult}) → ton-settlement picks up pending_reconcile entries"
+    }
+  },
+  "recommendation": "Extend Current Stack (Option 1) — lowest risk, leverages all existing verified components, aligns with hypothesis.yaml async settlement transition design"
+}

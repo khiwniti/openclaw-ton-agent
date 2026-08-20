@@ -4,6 +4,7 @@
  * deterministic and fee-aware.
  */
 import { newId } from "@openclaw-ton-agent/shared";
+import type { LifecycleState } from "@openclaw-ton-agent/shared";
 
 export type ExitMode = "snipe" | "swing" | "gamble" | "diamond";
 
@@ -51,12 +52,16 @@ export interface Position {
   swingHigh: number | null;
   /** hard time-stop; null = no time-stop (diamond). */
   timeStopMs: number | null;
-  /** indices of partial takes already executed. */
+  /** Indices of partial takes already executed. */
   partialTakesHit: number[];
-  /** laddered exit config (scale-out tranches). */
+  /** Laddered exit config (scale-out tranches). */
   ladderExits: LadderExit[];
-  /** number of consecutive exit sell bounces for this position. */
+  /** Number of consecutive exit sell bounces for this position. */
   bounceCount: number;
+  /** State of the position lifecycle. */
+  lifecycleState: LifecycleState;
+  /** ID of an active exit order to prevent duplicate exits. */
+  activeExitOrderId: string | null;
 }
 
 export interface LadderExit {
@@ -109,6 +114,8 @@ export function openPosition(input: OpenPositionInput): Position {
     partialTakesHit: [],
     ladderExits: input.ladderExits.map(le => ({ ...le, executed: false })),
     bounceCount: 0,
+    lifecycleState: "OPEN",
+    activeExitOrderId: null,
   };
 }
 

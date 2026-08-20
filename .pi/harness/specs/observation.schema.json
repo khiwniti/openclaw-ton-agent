@@ -37,8 +37,7 @@
 				"drift-monitor",
 				"sentrux",
 				"evaluator",
-				"harness-telemetry",
-				"agt-policy"
+				"harness-telemetry"
 			]
 		},
 		"kind": {

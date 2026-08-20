@@ -1,0 +1,89 @@
+# Sentrux rules — 2026-08-19
+# Docs: https://sentrux.dev/docs/rules-engine/
+# Sync: node $UP_PKG/.pi/scripts/sentrux-rules-sync.mjs --force (see .pi/scripts/README.md for UP_PKG) or /harness-sentrux-sync in pi
+#
+# Custom rules: add TOML below the managed block; they are preserved on sync.
+
+# --- harness:managed:start ---
+# Generated from .pi/harness/sentrux/architecture.manifest.json
+# Project: ultimate-pi
+# Schema: 1.0.0
+
+[constraints]
+max_cycles = 0
+max_coupling = "B"
+max_cc = 25
+no_god_files = true
+
+[[layers]]
+name = "knowledge"
+paths = ["graphify-out/*", "raw/*"]
+order = 0
+# Graphify graph, wiki, and raw ingestion sources
+
+[[layers]]
+name = "contracts"
+paths = [".pi/harness/specs/*", ".pi/harness/docs/*", ".pi/harness/policies/*", ".pi/harness/agents.policy.yaml", ".pi/harness/examples/*"]
+order = 1
+# Harness schemas, ADRs, AGT policies, and agents.policy SSOT
+
+[[layers]]
+name = "runtime"
+paths = [".pi/extensions/*"]
+order = 2
+# Pi extensions (policy-gate, telemetry, drift, etc.)
+
+[[layers]]
+name = "agents"
+paths = [".pi/agents/*", ".pi/harness/agents.manifest.json", ".pi/prompts/*", ".agents/skills/*"]
+order = 3
+# Agent definitions, prompts, and skills
+
+[[layers]]
+name = "tooling"
+paths = [".pi/scripts/*"]
+order = 4
+# Harness CLI scripts
+
+[[layers]]
+name = "foundation"
+paths = [".pi/lib/*"]
+order = 5
+# Shared harness/AGT libraries (imported by extensions and scripts)
+
+[[boundaries]]
+from = ".agents/skills/*"
+to = ".pi/extensions/*"
+reason = "Skills are NL-first; pi loads extensions — skills must not depend on extension modules"
+
+[[boundaries]]
+from = ".pi/prompts/*"
+to = ".pi/extensions/*"
+reason = "Prompts configure agents; they must not import extension implementation code"
+
+[[boundaries]]
+from = "graphify-out/*"
+to = ".pi/extensions/*"
+reason = "Knowledge graph output must not depend on harness runtime extensions"
+
+[[boundaries]]
+from = ".pi/harness/specs/*"
+to = ".pi/extensions/*"
+reason = "Contracts are data-only JSON schemas; extensions implement behavior"
+
+[[boundaries]]
+from = ".pi/lib/*"
+to = ".pi/extensions/*"
+reason = "Foundation lib must not import extension modules"
+
+[[boundaries]]
+from = ".pi/harness/policies/*"
+to = ".pi/extensions/*"
+reason = "Declarative AGT YAML must not depend on extension implementation"
+
+[[boundaries]]
+from = ".pi/scripts/*"
+to = ".agents/skills/*"
+reason = "CLI scripts stay independent of skill markdown"
+
+# --- harness:managed:end ---

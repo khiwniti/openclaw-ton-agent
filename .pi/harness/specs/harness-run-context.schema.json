@@ -86,9 +86,6 @@
 		"steer_max_attempts": {
 			"type": "integer",
 			"minimum": 1
-		},
-		"inline_repair_attempted": {
-			"type": "boolean"
 		}
 	}
 }

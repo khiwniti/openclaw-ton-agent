@@ -3,3 +3,4 @@
 {"timestamp":"2026-08-19T14:26:39.595Z","tool_name":"bash","severity":"medium","reasons":["test command includes '|| true' bypass"],"force_adversary":true}
 {"timestamp":"2026-08-19T14:28:24.987Z","tool_name":"bash","severity":"medium","reasons":["test command includes '|| true' bypass"],"force_adversary":true}
 {"timestamp":"2026-08-20T05:57:12.476Z","tool_name":"bash","severity":"medium","reasons":["test command includes '|| true' bypass"],"force_adversary":true}
+{"timestamp":"2026-08-20T14:07:39.132Z","tool_name":"bash","severity":"medium","reasons":["test command includes '|| true' bypass"],"force_adversary":true}

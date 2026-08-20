@@ -7,6 +7,9 @@ import type { ScannerSource, JettonView } from "./replay";
 import { auditJetton } from "./audit";
 import { tonapiGet } from "./tonapi";
 import { SCANNER_CONFIG } from "./config";
+import { globalResilience } from "@openclaw-ton-agent/shared";
+const stonFiBreaker = globalResilience.getBreaker("scanner-ston-fi", { failureThreshold: 5, resetTimeoutMs: 15_000 });
+const tonapiBreaker = globalResilience.getBreaker("scanner-tonapi", { failureThreshold: 5, resetTimeoutMs: 15_000 });
 
 const tonapiSourceImpl: ScannerSource = {
   name: "tonapi",

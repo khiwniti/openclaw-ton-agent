@@ -1,0 +1,16 @@
+{
+  "nextId": 2,
+  "tasks": [
+    {
+      "id": "1",
+      "subject": "Ask user for planning task",
+      "description": "Prompt the user for the task description to begin the harness-plan process.",
+      "status": "pending",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787232135518,
+      "updatedAt": 1787232135518
+    }
+  ]
+}

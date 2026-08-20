@@ -1,0 +1,506 @@
+{
+  "flymcp/go.mod": {
+    "mtime": 1787040522.2498586,
+    "seen": 1787231474.844473,
+    "ast_hash": "2d7b25881bb6d936655edd35e2a9e008",
+    "semantic_hash": ""
+  },
+  ".agents/skills/deepwiki/SKILL.md": {
+    "mtime": 1786983420.535838,
+    "seen": 1787231474.844485,
+    "ast_hash": "b03a2b3e433c0b0f8b34a5b6e2d6b6eb",
+    "semantic_hash": ""
+  },
+  ".agents/skills/ton-balance/SKILL.md": {
+    "mtime": 1786983420.535838,
+    "seen": 1787231474.8444886,
+    "ast_hash": "a6f265cf067b6fe15939d3df32c1aae6",
+    "semantic_hash": ""
+  },
+  ".agents/skills/ton-cli/SKILL.md": {
+    "mtime": 1786983420.535838,
+    "seen": 1787231474.8444912,
+    "ast_hash": "0d575a54476bef420698688110672caf",
+    "semantic_hash": ""
+  },
+  ".agents/skills/ton-create-wallet/SKILL.md": {
+    "mtime": 1786983420.5398378,
+    "seen": 1787231474.8444934,
+    "ast_hash": "b10ed1b084f2fc9826cc8f3721aa9e6f",
+    "semantic_hash": ""
+  },
+  ".agents/skills/ton-docs/SKILL.md": {
+    "mtime": 1786983420.5398378,
+    "seen": 1787231474.844495,
+    "ast_hash": "d59fd163852ec6bd346dc1f403031325",
+    "semantic_hash": ""
+  },
+  ".agents/skills/ton-manage-wallets/SKILL.md": {
+    "mtime": 1786983420.5398378,
+    "seen": 1787231474.8444967,
+    "ast_hash": "637a8fad1e2a6f7b83f39cd4d48076fb",
+    "semantic_hash": ""
+  },
+  ".agents/skills/ton-nfts/SKILL.md": {
+    "mtime": 1786983420.5398378,
+    "seen": 1787231474.8444982,
+    "ast_hash": "917429833e4864711ee47e3b2ce40c3f",
+    "semantic_hash": ""
+  },
+  ".agents/skills/ton-send/SKILL.md": {
+    "mtime": 1786983420.543838,
+    "seen": 1787231474.8444993,
+    "ast_hash": "b9159abbb48a470e39857e663f099fcc",
+    "semantic_hash": ""
+  },
+  ".agents/skills/ton-swap/SKILL.md": {
+    "mtime": 1786983420.543838,
+    "seen": 1787231474.8445008,
+    "ast_hash": "13b4ef00a53272566a4b437f55afc78a",
+    "semantic_hash": ""
+  },
+  ".agents/skills/ton-xstocks/SKILL.md": {
+    "mtime": 1786983420.543838,
+    "seen": 1787231474.844502,
+    "ast_hash": "05aed8c186e5f652d39dcc7cc93d2252",
+    "semantic_hash": ""
+  },
+  ".ls-lint.yml": {
+    "mtime": 1787149539.134774,
+    "seen": 1787231474.8445039,
+    "ast_hash": "f3614ae925ec3f99762e162ac49fd8e5",
+    "semantic_hash": ""
+  },
+  ".openharness/README.md": {
+    "mtime": 1786983420.551838,
+    "seen": 1787231474.8445053,
+    "ast_hash": "2b56ce35a3c83c6c6288163896ed552a",
+    "semantic_hash": ""
+  },
+  ".openharness/memory/MEMORY.md": {
+    "mtime": 1786983420.551838,
+    "seen": 1787231474.8445067,
+    "ast_hash": "0bf06e1c8c93a64de80fd2dc0c9fc488",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/gsd-execute-phase/SKILL.md": {
+    "mtime": 1786983420.5558379,
+    "seen": 1787231474.844508,
+    "ast_hash": "ffe088d5a2e7335c5117abd07987c741",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/gsd-plan-phase/SKILL.md": {
+    "mtime": 1786983420.5558379,
+    "seen": 1787231474.8445094,
+    "ast_hash": "b938f50ac92e753720a0414fa0343297",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/gsd-verify-work/SKILL.md": {
+    "mtime": 1786983420.5558379,
+    "seen": 1787231474.8445113,
+    "ast_hash": "5b8bc9a26c0ecc22add58e64351e5188",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/manual-override/SKILL.md": {
+    "mtime": 1786983420.5598378,
+    "seen": 1787231474.8445122,
+    "ast_hash": "e1fff617d0a26f6ba8f408ad5a4cedd7",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-audit/SKILL.md": {
+    "mtime": 1786983420.5598378,
+    "seen": 1787231474.844514,
+    "ast_hash": "a18e80f042eda79afaffcccbca435d8f",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-balance/SKILL.md": {
+    "mtime": 1786983420.5598378,
+    "seen": 1787231474.844515,
+    "ast_hash": "a6f265cf067b6fe15939d3df32c1aae6",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-blockchain/SKILL.md": {
+    "mtime": 1786983420.5598378,
+    "seen": 1787231474.8445163,
+    "ast_hash": "b50a33980fd79e7e57abc4b9e45c1d4d",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-blockchain/agents/openai.yaml": {
+    "mtime": 1786983420.563838,
+    "seen": 1787231474.8445177,
+    "ast_hash": "b742aca456d51a4257f73e0f69d05cad",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-cli/SKILL.md": {
+    "mtime": 1786983420.563838,
+    "seen": 1787231474.8445199,
+    "ast_hash": "0d575a54476bef420698688110672caf",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-create-wallet/SKILL.md": {
+    "mtime": 1786983420.563838,
+    "seen": 1787231474.8445213,
+    "ast_hash": "b10ed1b084f2fc9826cc8f3721aa9e6f",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-docs/SKILL.md": {
+    "mtime": 1786983420.563838,
+    "seen": 1787231474.8445225,
+    "ast_hash": "d59fd163852ec6bd346dc1f403031325",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-execute/SKILL.md": {
+    "mtime": 1786983420.567838,
+    "seen": 1787231474.8445241,
+    "ast_hash": "e93bc75220de6e2b38c7f6d532afbefa",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-exit-modes/SKILL.md": {
+    "mtime": 1786983420.567838,
+    "seen": 1787231474.8445256,
+    "ast_hash": "7e49b9bce5a6e466e48d0049a1582081",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-manage-wallets/SKILL.md": {
+    "mtime": 1786983420.567838,
+    "seen": 1787231474.844527,
+    "ast_hash": "637a8fad1e2a6f7b83f39cd4d48076fb",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-nfts/SKILL.md": {
+    "mtime": 1786983420.567838,
+    "seen": 1787231474.844529,
+    "ast_hash": "917429833e4864711ee47e3b2ce40c3f",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-reporting/SKILL.md": {
+    "mtime": 1786983420.567838,
+    "seen": 1787231474.8445303,
+    "ast_hash": "27cf3107aec63db5c968366b1cde5d2a",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-risk-gates/SKILL.md": {
+    "mtime": 1786983420.571838,
+    "seen": 1787231474.8445318,
+    "ast_hash": "68ed4f59c3f7e9770b87dc29b73f8c3f",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-send/SKILL.md": {
+    "mtime": 1786983420.571838,
+    "seen": 1787231474.8445332,
+    "ast_hash": "b9159abbb48a470e39857e663f099fcc",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-settlement/SKILL.md": {
+    "mtime": 1786983420.571838,
+    "seen": 1787231474.8445346,
+    "ast_hash": "18b516ad515219bdd9f6ce30b2e2216e",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-signal-ingest/SKILL.md": {
+    "mtime": 1786983420.571838,
+    "seen": 1787231474.8445358,
+    "ast_hash": "27cf67464366453564d285ee5562ff88",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-swap/SKILL.md": {
+    "mtime": 1786983420.5758379,
+    "seen": 1787231474.8445373,
+    "ast_hash": "13b4ef00a53272566a4b437f55afc78a",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-tpsl-manager/SKILL.md": {
+    "mtime": 1786983420.5758379,
+    "seen": 1787231474.8445387,
+    "ast_hash": "42adb85cecc757898b7428796409cd94",
+    "semantic_hash": ""
+  },
+  ".openharness/skills/ton-xstocks/SKILL.md": {
+    "mtime": 1786983420.5758379,
+    "seen": 1787231474.8445399,
+    "ast_hash": "05aed8c186e5f652d39dcc7cc93d2252",
+    "semantic_hash": ""
+  },
+  ".pi/harness/incidents/INC-2026-08-20-001.md": {
+    "mtime": 1787194692.8534691,
+    "seen": 1787231474.8445418,
+    "ast_hash": "cfa2c2da5a5dd525b36204ed0da36335",
+    "semantic_hash": ""
+  },
+  ".pi/harness/specs/README.md": {
+    "mtime": 1787231443.2119956,
+    "seen": 1787231474.8445435,
+    "ast_hash": "5c791a009acd419a36c6accac2bbeaa3",
+    "semantic_hash": ""
+  },
+  ".planning/codebase/ARCHITECTURE.md": {
+    "mtime": 1786983420.5798378,
+    "seen": 1787231474.8445451,
+    "ast_hash": "0538b77d73c906773d1f92954c72abbe",
+    "semantic_hash": ""
+  },
+  ".planning/codebase/CONCERNS.md": {
+    "mtime": 1786983420.5798378,
+    "seen": 1787231474.8445466,
+    "ast_hash": "99be843a4a5ccfa3355ccbc5fe7fa5e5",
+    "semantic_hash": ""
+  },
+  ".planning/codebase/CONVENTIONS.md": {
+    "mtime": 1786983420.5798378,
+    "seen": 1787231474.844548,
+    "ast_hash": "7802322eac6f6c2f6d9d879df4c44789",
+    "semantic_hash": ""
+  },
+  ".planning/codebase/INTEGRATIONS.md": {
+    "mtime": 1786983420.5798378,
+    "seen": 1787231474.8445494,
+    "ast_hash": "eeb740da57494da6d911d43fd19f2d77",
+    "semantic_hash": ""
+  },
+  ".planning/codebase/STACK.md": {
+    "mtime": 1786983420.5798378,
+    "seen": 1787231474.8445516,
+    "ast_hash": "1b7d526f8f4d0a47b89a15e154f12a84",
+    "semantic_hash": ""
+  },
+  ".planning/codebase/STRUCTURE.md": {
+    "mtime": 1786983420.5798378,
+    "seen": 1787231474.844553,
+    "ast_hash": "1272d652e36d9793111b910048c7bfc8",
+    "semantic_hash": ""
+  },
+  ".planning/codebase/TESTING.md": {
+    "mtime": 1786983420.583838,
+    "seen": 1787231474.8445547,
+    "ast_hash": "108f8fc36036777e6f16aec388c07c65",
+    "semantic_hash": ""
+  },
+  ".web/test-page.md": {
+    "mtime": 1787108888.8030615,
+    "seen": 1787231474.844556,
+    "ast_hash": "9808cf1bbdd9bd0151d36804110c5134",
+    "semantic_hash": ""
+  },
+  "2026-08-15-094300-please-see-on-prod-log-on-fly-io-and-fix-all-error.txt": {
+    "mtime": 1786983420.583838,
+    "seen": 1787231474.8445575,
+    "ast_hash": "84048f61433594dc169610b53984c4ff",
+    "semantic_hash": ""
+  },
+  "2026-08-19-010958-this-session-is-being-continued-from-a-previous-c.txt": {
+    "mtime": 1787076602.1979945,
+    "seen": 1787231474.844559,
+    "ast_hash": "226bb7d238afbbeae601880bf8c5413a",
+    "semantic_hash": ""
+  },
+  "AGENTS.md": {
+    "mtime": 1787149713.9547737,
+    "seen": 1787231474.8445604,
+    "ast_hash": "412fa13dd967d8891cbf167c73bf8cc4",
+    "semantic_hash": ""
+  },
+  "CLAUDE.md": {
+    "mtime": 1786983420.583838,
+    "seen": 1787231474.8445616,
+    "ast_hash": "033b50b46fcd034a13d662db13ae53b5",
+    "semantic_hash": ""
+  },
+  "GEMINI.md": {
+    "mtime": 1786983420.583838,
+    "seen": 1787231474.8445632,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "HANDOFF_2026-08-15.md": {
+    "mtime": 1786983420.583838,
+    "seen": 1787231474.8445644,
+    "ast_hash": "1c747a675fd571c4794e881b9546cfaf",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1786983420.583838,
+    "seen": 1787231474.8445663,
+    "ast_hash": "12503441d9048aae3db6be37e24a11af",
+    "semantic_hash": ""
+  },
+  "bug-report.txt": {
+    "mtime": 1787119795.2030537,
+    "seen": 1787231474.8445678,
+    "ast_hash": "3c2474122a210571df8f4f87810e8eaa",
+    "semantic_hash": ""
+  },
+  "docker-compose.yml": {
+    "mtime": 1786983420.587838,
+    "seen": 1787231474.8445692,
+    "ast_hash": "c49b5c74fb2e1e297bc0ef826b343ac4",
+    "semantic_hash": ""
+  },
+  "docs/AI_TRADING_RULES.md": {
+    "mtime": 1786983420.587838,
+    "seen": 1787231474.8445704,
+    "ast_hash": "add69a8d8b475eb79990dfa55af61715",
+    "semantic_hash": ""
+  },
+  "docs/ARCHITECTURE_DESIGN.md": {
+    "mtime": 1787202846.0494633,
+    "seen": 1787231474.8445716,
+    "ast_hash": "1e025711d44070228bcd804a10ac0a3e",
+    "semantic_hash": ""
+  },
+  "docs/architecture.md": {
+    "mtime": 1786983420.587838,
+    "seen": 1787231474.844573,
+    "ast_hash": "db4436ad38e1129c80b91a51b2157aeb",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/plans/2026-08-18-simulation-wallet.md": {
+    "mtime": 1787070938.2419984,
+    "seen": 1787231474.8445747,
+    "ast_hash": "fc8742a829e06db6b6e6bee7bbb6fc73",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/specs/2026-08-18-simulation-wallet-design.md": {
+    "mtime": 1787069295.5179996,
+    "seen": 1787231474.8445764,
+    "ast_hash": "6c3b8dd7e94e1630371ae178cc7ba1be",
+    "semantic_hash": ""
+  },
+  "enhace-report.md": {
+    "mtime": 1787229863.7439969,
+    "seen": 1787231474.844578,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "enhance-report.md": {
+    "mtime": 1787229898.5999968,
+    "seen": 1787231474.84458,
+    "ast_hash": "bd242088b2958be3bf5dde3ff201f6b0",
+    "semantic_hash": ""
+  },
+  "flymcp/README.md": {
+    "mtime": 1787040522.2458584,
+    "seen": 1787231474.8445811,
+    "ast_hash": "2b358cc7d9bef988741f69235cf38278",
+    "semantic_hash": ""
+  },
+  "skills/manual-override/SKILL.md": {
+    "mtime": 1786983420.7278378,
+    "seen": 1787231474.8445826,
+    "ast_hash": "e1fff617d0a26f6ba8f408ad5a4cedd7",
+    "semantic_hash": ""
+  },
+  "skills/ton-audit/SKILL.md": {
+    "mtime": 1786983420.7278378,
+    "seen": 1787231474.844584,
+    "ast_hash": "a18e80f042eda79afaffcccbca435d8f",
+    "semantic_hash": ""
+  },
+  "skills/ton-execute/SKILL.md": {
+    "mtime": 1786983420.731838,
+    "seen": 1787231474.8445852,
+    "ast_hash": "e93bc75220de6e2b38c7f6d532afbefa",
+    "semantic_hash": ""
+  },
+  "skills/ton-exit-modes/SKILL.md": {
+    "mtime": 1786983420.731838,
+    "seen": 1787231474.8445866,
+    "ast_hash": "7e49b9bce5a6e466e48d0049a1582081",
+    "semantic_hash": ""
+  },
+  "skills/ton-reporting/SKILL.md": {
+    "mtime": 1786983420.735838,
+    "seen": 1787231474.844588,
+    "ast_hash": "27cf3107aec63db5c968366b1cde5d2a",
+    "semantic_hash": ""
+  },
+  "skills/ton-risk-gates/SKILL.md": {
+    "mtime": 1786983420.735838,
+    "seen": 1787231474.8445892,
+    "ast_hash": "68ed4f59c3f7e9770b87dc29b73f8c3f",
+    "semantic_hash": ""
+  },
+  "skills/ton-settlement/SKILL.md": {
+    "mtime": 1786983420.739838,
+    "seen": 1787231474.8445907,
+    "ast_hash": "18b516ad515219bdd9f6ce30b2e2216e",
+    "semantic_hash": ""
+  },
+  "skills/ton-signal-ingest/SKILL.md": {
+    "mtime": 1786983420.739838,
+    "seen": 1787231474.8445919,
+    "ast_hash": "27cf67464366453564d285ee5562ff88",
+    "semantic_hash": ""
+  },
+  "skills/ton-tpsl-manager/SKILL.md": {
+    "mtime": 1786983420.7438378,
+    "seen": 1787231474.844593,
+    "ast_hash": "42adb85cecc757898b7428796409cd94",
+    "semantic_hash": ""
+  },
+  "specs/tech-architecture/tech-stack.md": {
+    "mtime": 1787191523.8733943,
+    "seen": 1787231474.8445947,
+    "ast_hash": "a16907613db398cc3f45e4ada989a06f",
+    "semantic_hash": ""
+  },
+  "workspace/executor/AGENTS.md": {
+    "mtime": 1786983420.747838,
+    "seen": 1787231474.844596,
+    "ast_hash": "d85bb5858cdb4e8d8a5b85ec31dc23b5",
+    "semantic_hash": ""
+  },
+  "workspace/executor/SOUL.md": {
+    "mtime": 1786983420.747838,
+    "seen": 1787231474.8445976,
+    "ast_hash": "8c52db814fd32c871d689061222cce48",
+    "semantic_hash": ""
+  },
+  "workspace/market-intel/AGENTS.md": {
+    "mtime": 1786983420.747838,
+    "seen": 1787231474.8445985,
+    "ast_hash": "40dee370d3570f9c0e856e0f9a66dc40",
+    "semantic_hash": ""
+  },
+  "workspace/market-intel/SOUL.md": {
+    "mtime": 1786983420.751838,
+    "seen": 1787231474.8445997,
+    "ast_hash": "0f94cbb0fbf71d48669a9eb0db2c81b1",
+    "semantic_hash": ""
+  },
+  "workspace/risk-analyst/AGENTS.md": {
+    "mtime": 1786983420.751838,
+    "seen": 1787231474.8446014,
+    "ast_hash": "22c1f828de23c7597854982badfc37f9",
+    "semantic_hash": ""
+  },
+  "workspace/risk-analyst/SOUL.md": {
+    "mtime": 1786983420.751838,
+    "seen": 1787231474.8446028,
+    "ast_hash": "25547abf6877c62598e61e51e55b63ec",
+    "semantic_hash": ""
+  },
+  "workspace/scanner-ops/AGENTS.md": {
+    "mtime": 1786983420.751838,
+    "seen": 1787231474.8446045,
+    "ast_hash": "24f886877caf26d17bad79a34205a002",
+    "semantic_hash": ""
+  },
+  "workspace/scanner-ops/SOUL.md": {
+    "mtime": 1786983420.751838,
+    "seen": 1787231474.8446057,
+    "ast_hash": "9410912a7c74418c5047b2b07e98081a",
+    "semantic_hash": ""
+  },
+  "workspace/trader-ui/AGENTS.md": {
+    "mtime": 1786983420.755838,
+    "seen": 1787231474.844607,
+    "ast_hash": "4a75d80e2bb51c1d95e8739019f39d4a",
+    "semantic_hash": ""
+  },
+  "workspace/trader-ui/SOUL.md": {
+    "mtime": 1786983420.755838,
+    "seen": 1787231474.8446085,
+    "ast_hash": "7b17bec89c41f571bd622ec18a811dcd",
+    "semantic_hash": ""
+  }
+}

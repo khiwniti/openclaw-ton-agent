@@ -1,0 +1,229 @@
+schema_version: 1.0.0
+contract_version: 1.1.0
+plan_id: plan-openclaw-allphases
+task_id: all-phases-master-plan
+scope: >
+  Master plan for OpenClaw TON Trading Agent covering all phases:
+  Phase 1 (Correctness Fixes - complete), Phase 2 (Observability &
+  Monitoring - complete), Phase 3 (Resilience & Fault Tolerance - complete),
+  Phase 4 (Performance & Scalability), and Phase 5 (Documentation & Hardening).
+assumptions:
+  - Phase 1 correctness foundation is stable and tested.
+  - Phase 2 observability endpoints are operational.
+  - Phase 3 resilience patterns are in place.
+  - Existing monorepo packages can be extended without breaking changes.
+  - Performance tuning targets are documented in existing benchmarks.
+  - Documentation updates can be made in parallel with code changes.
+risk_level: med
+acceptance_checks:
+  - id: AC-ALL-1
+    description: All phases have defined exit criteria and test coverage.
+  - id: AC-ALL-2
+    description: Phase dependencies are respected (e.g., Phase 2 after Phase 1).
+  - id: AC-ALL-3
+    description: Each phase produces verifiable artifacts (tests, docs, metrics).
+rollback_plan:
+  revert_commit_ready: true
+  rollback_artifacts:
+    revert_command: git revert HEAD
+    revert_branch: main
+    patch_bundle: rollback.patch
+execution_plan:
+  dag_mode: strict
+  phases:
+    - phase_id: phase1-correctness
+      name: Phase 1: Correctness Fixes
+      status: completed
+      exit_criteria:
+        - LifecycleState and FillRecord schemas implemented
+        - PositionStateMachine and PositionJournal with idempotency keys
+        - Settlement-gated P&L with async reconciler
+        - OPEN-only monitoring enforced
+        - All tests passing
+    - phase_id: phase2-observability
+      name: Phase 2: Observability & Monitoring
+      status: completed
+      exit_criteria:
+        - Structured JSON logging covers all critical paths
+        - Metrics exposed via /health and /metrics endpoints
+        - Dashboard or alerting hooks defined for key events
+        - Trace IDs propagated across async boundaries
+    - phase_id: phase3-resilience
+      name: Phase 3: Resilience & Fault Tolerance
+      status: completed
+      exit_criteria:
+        - Circuit breakers for external API calls (TON center, DEX APIs)
+        - Retry logic with exponential backoff for transient failures
+        - Graceful degradation when settlement verification is unavailable
+        - Health checks for all critical dependencies
+        - Timeout handling for all network operations
+    - phase_id: phase4-performance
+      name: Phase 4: Performance & Scalability
+      status: completed
+      exit_criteria:
+        - Scan pipeline handles 10k+ candidates per tick without memory growth
+        - Order queue depth bounded with backpressure
+        - Position monitoring loop p99 < 2ms per position
+        - Benchmark suite passes with performance regressions flagged
+      work_item_ids:
+        - wi-phase4-1
+        - wi-phase4-2
+        - wi-phase4-3
+    - phase_id: phase5-hardening
+      name: Phase 5: Documentation & Hardening
+      status: completed
+      exit_criteria:
+        - ADRs reviewed and gaps documented
+        - Runbooks for common failure modes created
+        - Security review passed (all tests green)
+        - Sentrux rules operational
+      work_item_ids:
+        - wi-phase5-1
+        - wi-phase5-2
+        - wi-phase5-3
+  work_items:
+    - work_item_id: wi-phase1-1
+      phase_id: phase1-correctness
+      depends_on: []
+      status: completed
+      acceptance_check_ids:
+        - AC-ALL-1
+        - AC-ALL-2
+    - work_item_id: wi-phase2-1
+      phase_id: phase2-observability
+      depends_on:
+        - wi-phase1-1
+      status: completed
+      acceptance_check_ids:
+        - AC-ALL-1
+        - AC-ALL-3
+    - work_item_id: wi-phase2-2
+      phase_id: phase2-observability
+      depends_on:
+        - wi-phase1-1
+      status: completed
+      acceptance_check_ids:
+        - AC-ALL-1
+        - AC-ALL-3
+    - work_item_id: wi-phase2-3
+      phase_id: phase2-observability
+      depends_on:
+        - wi-phase2-1
+        - wi-phase2-2
+      status: completed
+      acceptance_check_ids:
+        - AC-ALL-1
+        - AC-ALL-3
+    - work_item_id: wi-phase3-1
+      phase_id: phase3-resilience
+      depends_on:
+        - wi-phase1-1
+        - wi-phase2-1
+      status: completed
+      acceptance_check_ids:
+        - AC-ALL-1
+        - AC-ALL-3
+    - work_item_id: wi-phase3-2
+      phase_id: phase3-resilience
+      depends_on:
+        - wi-phase1-1
+        - wi-phase2-1
+      status: completed
+      acceptance_check_ids:
+        - AC-ALL-1
+        - AC-ALL-3
+    - work_item_id: wi-phase3-3
+      phase_id: phase3-resilience
+      depends_on:
+        - wi-phase3-1
+        - wi-phase3-2
+      status: completed
+      acceptance_check_ids:
+        - AC-ALL-1
+        - AC-ALL-3
+    - work_item_id: wi-phase4-1
+      phase_id: phase4-performance
+      depends_on:
+        - wi-phase1-1
+        - wi-phase2-1
+      status: completed
+      acceptance_check_ids:
+        - AC-ALL-1
+        - AC-ALL-3
+    - work_item_id: wi-phase4-2
+      phase_id: phase4-performance
+      depends_on:
+        - wi-phase1-1
+        - wi-phase2-1
+      status: completed
+      acceptance_check_ids:
+        - AC-ALL-1
+        - AC-ALL-3
+    - work_item_id: wi-phase4-3
+      phase_id: phase4-performance
+      depends_on:
+        - wi-phase4-1
+        - wi-phase4-2
+      status: completed
+      acceptance_check_ids:
+        - AC-ALL-1
+        - AC-ALL-3
+    - work_item_id: wi-phase5-1
+      phase_id: phase5-hardening
+      depends_on:
+        - wi-phase1-1
+        - wi-phase2-1
+        - wi-phase3-1
+        - wi-phase4-1
+      status: completed
+      acceptance_check_ids:
+        - AC-ALL-1
+        - AC-ALL-3
+    - work_item_id: wi-phase5-2
+      phase_id: phase5-hardening
+      depends_on:
+        - wi-phase1-1
+        - wi-phase2-1
+        - wi-phase3-1
+        - wi-phase4-1
+      status: completed
+      acceptance_check_ids:
+        - AC-ALL-1
+        - AC-ALL-3
+    - work_item_id: wi-phase5-3
+      phase_id: phase5-hardening
+      depends_on:
+        - wi-phase5-1
+        - wi-phase5-2
+      status: completed
+      acceptance_check_ids:
+        - AC-ALL-1
+        - AC-ALL-3
+  risk_register:
+    - id: R-ALL-1
+      description: Multi-phase plan may introduce integration complexity
+      likelihood: med
+      impact: med
+      mitigation: Strict phase boundaries with integration tests between phases
+    - id: R-ALL-2
+      description: Observability changes may impact performance
+      likelihood: low
+      impact: med
+      mitigation: Benchmark before/after; async logging where possible
+    - id: R-ALL-3
+      description: Resilience patterns may add latency
+      likelihood: low
+      impact: low
+      mitigation: Configurable timeouts; p99 targets enforced
+  schedule_metadata:
+    critical_path_work_item_ids:
+      - wi-phase1-1
+      - wi-phase2-1
+      - wi-phase3-1
+      - wi-phase4-1
+      - wi-phase5-1
+  dag_validation:
+    status: pass
+    cycles: []
+    conflicts: []
+executor_strategy: sequential_phases
